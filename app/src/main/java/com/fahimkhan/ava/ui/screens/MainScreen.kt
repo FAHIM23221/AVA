@@ -1,5 +1,6 @@
 package com.fahimkhan.ava.ui.screens
 
+import android.Manifest
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +28,10 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.fahimkhan.ava.ui.components.*
 import com.fahimkhan.ava.ui.theme.AvaColors
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import com.google.accompanist.permissions.shouldShowRationale
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -40,6 +45,7 @@ fun getMoodLabel(mood: AvaMood) = when (mood) {
     AvaMood.PROTECTIVE -> "◈ PROTECTIVE MODE"
 }
 
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MainScreen(
     viewModel          : MainViewModel = hiltViewModel(),
@@ -56,6 +62,22 @@ fun MainScreen(
 
     var tapCount by remember { mutableStateOf(0) }
     var lastTap  by remember { mutableStateOf(0L) }
+
+    val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
+    var showMicDeniedHint by remember { mutableStateOf(false) }
+    var awaitingMicGrant  by remember { mutableStateOf(false) }
+
+    LaunchedEffect(micPermission.status.isGranted) {
+        if (awaitingMicGrant && micPermission.status.isGranted) {
+            awaitingMicGrant = false
+            showMicDeniedHint = false
+            viewModel.toggleListening()
+        } else if (awaitingMicGrant && !micPermission.status.isGranted) {
+            // User just denied the system dialog
+            awaitingMicGrant = false
+            showMicDeniedHint = true
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize().background(AvaColors.BlackAbyss)) {
 
@@ -98,7 +120,10 @@ fun MainScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            AvaSubtitleCard(text = subtitle, orbState = orbState)
+            AvaSubtitleCard(
+                text = if (showMicDeniedHint) "I need microphone access to hear you, Boss. Please allow it in your phone's App Settings." else subtitle,
+                orbState = orbState
+            )
 
             Spacer(Modifier.weight(1f))
 
@@ -112,7 +137,15 @@ fun MainScreen(
 
             AvaInteractionPanel(
                 orbState = orbState,
-                onMicClick = { viewModel.toggleListening() },
+                onMicClick = {
+                    if (micPermission.status.isGranted) {
+                        showMicDeniedHint = false
+                        viewModel.toggleListening()
+                    } else {
+                        awaitingMicGrant = true
+                        micPermission.launchPermissionRequest()
+                    }
+                },
                 onNavigateMemory = onNavigateMemory,
                 onNavigateVision = onNavigateVision,
                 onNavigateSecurity = onNavigateSecurity,

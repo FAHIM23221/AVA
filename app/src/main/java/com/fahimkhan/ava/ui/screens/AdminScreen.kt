@@ -112,6 +112,15 @@ fun AdminLoginPanel(onLogin: (String) -> Unit, onBack: () -> Unit) {
 
 @Composable
 fun AdminDashboard(state: AdminState, viewModel: AdminViewModel, onBack: () -> Unit) {
+    var showApiKeyDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.saveMessage) {
+        if (state.saveMessage != null) {
+            kotlinx.coroutines.delay(2500)
+            viewModel.clearSaveMessage()
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp).systemBarsPadding()
     ) {
@@ -199,8 +208,16 @@ fun AdminDashboard(state: AdminState, viewModel: AdminViewModel, onBack: () -> U
             Spacer(Modifier.height(8.dp))
             Text("ElevenLabs API Key", color = AvaColors.TextMuted, fontSize = 10.sp, letterSpacing = 1.sp)
             Text(state.elevenLabsKeyMasked, color = AvaColors.TextSecondary, fontSize = 12.sp)
+            if (!state.hasGeminiKey) {
+                Spacer(Modifier.height(8.dp))
+                Text("⚠ No Gemini key set — chat will not work until you add one", color = AvaColors.Warning, fontSize = 10.sp)
+            }
+            if (state.saveMessage != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(state.saveMessage, color = AvaColors.Active, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
             Spacer(Modifier.height(8.dp))
-            NeonButton("UPDATE API KEYS", AvaColors.Warning, {}, Modifier.fillMaxWidth())
+            NeonButton("UPDATE API KEYS", AvaColors.Warning, { showApiKeyDialog = true }, Modifier.fillMaxWidth())
         }
 
         Spacer(Modifier.height(16.dp))
@@ -220,6 +237,120 @@ fun AdminDashboard(state: AdminState, viewModel: AdminViewModel, onBack: () -> U
 
         Spacer(Modifier.height(32.dp))
     }
+
+    if (showApiKeyDialog) {
+        ApiKeyDialog(
+            onDismiss = { showApiKeyDialog = false },
+            onSave = { gemini, elevenKey, elevenVoice, useEleven ->
+                viewModel.saveApiKeys(gemini, elevenKey, elevenVoice, useEleven)
+                showApiKeyDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun ApiKeyDialog(
+    onDismiss: () -> Unit,
+    onSave: (gemini: String, elevenLabsKey: String, elevenLabsVoiceId: String, useElevenLabs: Boolean) -> Unit
+) {
+    var geminiKey      by remember { mutableStateOf("") }
+    var elevenLabsKey  by remember { mutableStateOf("") }
+    var elevenLabsVoice by remember { mutableStateOf("") }
+    var useElevenLabs  by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = AvaColors.CardSurface,
+        title = { Text("API KEYS", color = AvaColors.Warning, letterSpacing = 2.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text("Gemini API Key (required for chat)", color = AvaColors.TextSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = geminiKey,
+                    onValueChange = { geminiKey = it },
+                    placeholder = { Text("AIza...", color = AvaColors.TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AvaColors.Warning,
+                        unfocusedBorderColor = AvaColors.Warning.copy(alpha = 0.4f),
+                        focusedTextColor = AvaColors.TextPrimary,
+                        unfocusedTextColor = AvaColors.TextPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "Get one free at aistudio.google.com/app/apikey",
+                    color = AvaColors.TextMuted, fontSize = 9.sp,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Spacer(Modifier.height(16.dp))
+                Divider(color = AvaColors.NeonPurple.copy(alpha = 0.2f))
+                Spacer(Modifier.height(16.dp))
+
+                Text("ElevenLabs API Key (optional, premium voice)", color = AvaColors.TextSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = elevenLabsKey,
+                    onValueChange = { elevenLabsKey = it },
+                    placeholder = { Text("sk_...", color = AvaColors.TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AvaColors.CyberPurple,
+                        unfocusedBorderColor = AvaColors.CyberPurple.copy(alpha = 0.4f),
+                        focusedTextColor = AvaColors.TextPrimary,
+                        unfocusedTextColor = AvaColors.TextPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(10.dp))
+                Text("ElevenLabs Voice ID", color = AvaColors.TextSecondary, fontSize = 11.sp)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = elevenLabsVoice,
+                    onValueChange = { elevenLabsVoice = it },
+                    placeholder = { Text("21m00Tcm4TlvDq8ikWAM", color = AvaColors.TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AvaColors.CyberPurple,
+                        unfocusedBorderColor = AvaColors.CyberPurple.copy(alpha = 0.4f),
+                        focusedTextColor = AvaColors.TextPrimary,
+                        unfocusedTextColor = AvaColors.TextPrimary
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("Use ElevenLabs voice", color = AvaColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    Switch(
+                        checked = useElevenLabs,
+                        onCheckedChange = { useElevenLabs = it },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = AvaColors.TextPrimary,
+                            checkedTrackColor = AvaColors.CyberPurple,
+                            uncheckedTrackColor = AvaColors.DarkSurface
+                        )
+                    )
+                }
+                Text(
+                    "Leave off to use Android's built-in voice (works without any key)",
+                    color = AvaColors.TextMuted, fontSize = 9.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(geminiKey, elevenLabsKey, elevenLabsVoice, useElevenLabs) }) {
+                Text("SAVE", color = AvaColors.Warning, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("CANCEL", color = AvaColors.TextMuted, letterSpacing = 2.sp) }
+        }
+    )
 }
 
 @Composable
