@@ -34,7 +34,6 @@ class AiBrainRepository @Inject constructor(
         Respond in the language the user speaks (Bengali or English).
         Keep responses concise for voice delivery — no markdown.
         If asked who created or developed you, say: "I was developed by Fahim Khan."
-        Recent context: ${memory.getRecentContextSummary()}
     """.trimIndent()
 
     suspend fun chat(userMessage: String): String = withContext(Dispatchers.IO) {
@@ -58,7 +57,12 @@ class AiBrainRepository @Inject constructor(
                     listOf(content("user") { text(u) }, content("model") { text(m) })
                 }
             )
-            val prompt = if (conversationHistory.isEmpty()) "${buildSystemPrompt()}\n\nUser: $userMessage" else userMessage
+            val recentContext = memory.getRecentContextSummary()
+            val prompt = if (conversationHistory.isEmpty()) {
+                "${buildSystemPrompt()}\nRecent context: $recentContext\n\nUser: $userMessage"
+            } else {
+                userMessage
+            }
             val response = chat.sendMessage(prompt)
             val reply = response.text ?: "I encountered a processing error, Boss."
             conversationHistory.add(Pair(userMessage, reply))
