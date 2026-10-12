@@ -21,7 +21,7 @@ class AiBrainRepository @Inject constructor(
     private val model = GenerativeModel(modelName = "gemini-pro", apiKey = BuildConfig.GEMINI_API_KEY)
     private val conversationHistory = mutableListOf<Pair<String, String>>()
 
-    private fun buildSystemPrompt() = """
+    private suspend fun buildSystemPrompt() = """
         You are AVA, an advanced AI Companion developed by Fahim Khan.
         Current personality mode: ${personality.getCurrentModeDescription()}
         Call the user "Boss" 75% of the time, their name 20%, special names 5% (GF mode only).
