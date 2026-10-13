@@ -1,5 +1,7 @@
 package com.fahimkhan.ava.animations
 
+import androidx.compose.ui.unit.dp
+
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.*
@@ -9,7 +11,6 @@ import androidx.compose.ui.graphics.Color
 import com.fahimkhan.ava.ui.theme.AvaColors
 import kotlin.math.*
 import kotlin.random.Random
-import androidx.compose.ui.unit.dp
 
 // ══════════════════════════════════════════════════════
 //  PARTICLE DATA CLASS
