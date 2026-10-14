@@ -24,10 +24,12 @@ class DeviceControlSystem @Inject constructor(@ApplicationContext private val co
     fun decreaseVolume() = audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
     fun muteVolume()     = audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE,  0)
 
-    fun toggleFlashlight(): Boolean = try {
+    fun toggleFlashlight(): Boolean {
+        return try {
         val id = cameraManager.cameraIdList.firstOrNull() ?: return false
         torchOn = !torchOn; cameraManager.setTorchMode(id, torchOn); torchOn
     } catch (e: Exception) { false }
+    }
 
     @Suppress("DEPRECATION")
     fun setWifi(enabled: Boolean) { if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) wifiManager.isWifiEnabled = enabled }
