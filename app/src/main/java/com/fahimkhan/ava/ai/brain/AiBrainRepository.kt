@@ -45,7 +45,7 @@ class AiBrainRepository @Inject constructor(
     // gemini-1.5-flash / gemini-pro).
     private val modelId = "gemini-flash-latest"
 
-    private suspend fun buildSystemPrompt(): String = """
+    private fun buildSystemPrompt(): String = """
         You are AVA, an advanced AI Companion developed by Fahim Khan.
         Current personality mode: ${personality.getCurrentModeDescription()}
         Call the user "Boss" 75% of the time, their name 20%, special names 5% (GF mode only).
@@ -70,47 +70,32 @@ class AiBrainRepository @Inject constructor(
         }
 
         try {
-            val contents = JSONArray()
-            conversationHistory.forEach { (user, model) ->
-                contents.put(turnJson("user", user))
-                contents.put(turnJson("model", model))
-            }
             val promptText = if (conversationHistory.isEmpty()) {
                 "${buildSystemPrompt()}\n\nUser: $userMessage"
             } else {
                 userMessage
             }
-            contents.put(turnJson("user", promptText))
 
-            val requestBody = JSONObject().apply { put("contents", contents) }
+            var httpResult = callGemini(apiKey, promptText)
 
-            val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent")
-                .addHeader("x-goog-api-key", apiKey)
-                .addHeader("Content-Type", "application/json")
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                return@withContext interpretHttpError(response.code, responseBody)
+            // A 429 can be a brief burst limit rather than a hard daily cap —
+            // wait a moment and try exactly once more before giving up.
+            if (httpResult is GeminiCallResult.HttpError && httpResult.code == 429) {
+                kotlinx.coroutines.delay(3000)
+                httpResult = callGemini(apiKey, promptText)
             }
 
-            val json = JSONObject(responseBody)
-            val reply = json.optJSONArray("candidates")
-                ?.optJSONObject(0)
-                ?.optJSONObject("content")
-                ?.optJSONArray("parts")
-                ?.optJSONObject(0)
-                ?.optString("text")
-                ?.takeIf { it.isNotBlank() }
-                ?: "I encountered a processing error, Boss."
-
-            conversationHistory.add(Pair(userMessage, reply))
-            if (conversationHistory.size > 20) conversationHistory.removeAt(0)
-            reply
+            when (httpResult) {
+                is GeminiCallResult.Success -> {
+                    conversationHistory.add(Pair(userMessage, httpResult.text))
+                    // Keep history short: fewer tokens per request = less
+                    // chance of hitting per-minute token quota, and a lower
+                    // bill even on paid keys.
+                    if (conversationHistory.size > 6) conversationHistory.removeAt(0)
+                    httpResult.text
+                }
+                is GeminiCallResult.HttpError -> interpretHttpError(httpResult.code, httpResult.body)
+            }
         } catch (e: Exception) {
             val msg = e.message ?: ""
             when {
@@ -121,6 +106,48 @@ class AiBrainRepository @Inject constructor(
                 else -> "Neural link disruption, Boss: ${msg.take(100)}"
             }
         }
+    }
+
+    private sealed class GeminiCallResult {
+        data class Success(val text: String) : GeminiCallResult()
+        data class HttpError(val code: Int, val body: String) : GeminiCallResult()
+    }
+
+    private fun callGemini(apiKey: String, promptText: String): GeminiCallResult {
+        val contents = JSONArray()
+        conversationHistory.forEach { (user, model) ->
+            contents.put(turnJson("user", user))
+            contents.put(turnJson("model", model))
+        }
+        contents.put(turnJson("user", promptText))
+
+        val requestBody = JSONObject().apply { put("contents", contents) }
+
+        val request = Request.Builder()
+            .url("https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent")
+            .addHeader("x-goog-api-key", apiKey)
+            .addHeader("Content-Type", "application/json")
+            .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        val response = httpClient.newCall(request).execute()
+        val responseBody = response.body?.string().orEmpty()
+
+        if (!response.isSuccessful) {
+            return GeminiCallResult.HttpError(response.code, responseBody)
+        }
+
+        val json = JSONObject(responseBody)
+        val reply = json.optJSONArray("candidates")
+            ?.optJSONObject(0)
+            ?.optJSONObject("content")
+            ?.optJSONArray("parts")
+            ?.optJSONObject(0)
+            ?.optString("text")
+            ?.takeIf { it.isNotBlank() }
+            ?: "I encountered a processing error, Boss."
+
+        return GeminiCallResult.Success(reply)
     }
 
     private fun turnJson(role: String, text: String) = JSONObject().apply {

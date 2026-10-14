@@ -1,7 +1,5 @@
 package com.fahimkhan.ava.animations
 
-import androidx.compose.ui.unit.dp
-
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.*

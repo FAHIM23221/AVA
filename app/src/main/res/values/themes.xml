@@ -2,7 +2,7 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
 
     <!-- AVA Base Theme -->
-    <style name="Theme.AVA" parent="android:style/Theme.Material.NoActionBar">
+    <style name="Theme.AVA" parent="android:Theme.Material.NoTitleBar.Fullscreen">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/ava_black_abyss</item>
