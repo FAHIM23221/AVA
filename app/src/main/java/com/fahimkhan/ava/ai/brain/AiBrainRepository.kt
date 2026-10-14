@@ -55,7 +55,7 @@ class AiBrainRepository @Inject constructor(
     // flash model is at that time.
     private val modelId = "gemini-2.5-flash"
 
-    private fun buildSystemPrompt(): String = """
+    private suspend fun buildSystemPrompt(): String = """
         You are AVA, an advanced AI Companion developed by Fahim Khan.
         Current personality mode: ${personality.getCurrentModeDescription()}
         Call the user "Boss" 75% of the time, their name 20%, special names 5% (GF mode only).
