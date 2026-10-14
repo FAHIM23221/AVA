@@ -13,6 +13,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,15 +38,24 @@ class AiBrainRepository @Inject constructor(
     private val apiKeyStore: ApiKeyStore
 ) {
     private val conversationHistory = mutableListOf<Pair<String, String>>()
-    private val httpClient = OkHttpClient()
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
 
-    // "gemini-flash-latest" is a Google-maintained alias that always points
-    // at their current fast/cheap model, so this never goes stale even as
-    // Google retires specific dated model versions (as happened with
-    // gemini-1.5-flash / gemini-pro).
-    private val modelId = "gemini-flash-latest"
+    // Pinned to a specific stable model rather than the "-latest" alias.
+    // "-latest" silently follows Google's newest release, and newest often
+    // means a much stingier (or zero) free-tier quota — confirmed by
+    // testing, where "gemini-flash-latest" resolved to gemini-3.8-flash
+    // with only 20 free requests/day. gemini-2.5-flash is Google's current
+    // stable, free-tier-friendly workhorse model (hundreds to ~1500
+    // requests/day free). When Google eventually retires this model,
+    // switch this string to whatever their current stable (non "-latest")
+    // flash model is at that time.
+    private val modelId = "gemini-2.5-flash"
 
-    private suspend fun buildSystemPrompt(): String = """
+    private fun buildSystemPrompt(): String = """
         You are AVA, an advanced AI Companion developed by Fahim Khan.
         Current personality mode: ${personality.getCurrentModeDescription()}
         Call the user "Boss" 75% of the time, their name 20%, special names 5% (GF mode only).
@@ -102,8 +112,8 @@ class AiBrainRepository @Inject constructor(
                 msg.contains("Unable to resolve host", true) || msg.contains("UnknownHost", true) ->
                     "No internet connection, Boss. I need network access to think."
                 msg.contains("timeout", true) ->
-                    "The connection timed out, Boss. Try again."
-                else -> "Neural link disruption, Boss: ${msg.take(100)}"
+                    "The connection timed out, Boss (${e.javaClass.simpleName}). Try again."
+                else -> "Neural link disruption, Boss (${e.javaClass.simpleName}): ${msg.take(100)}"
             }
         }
     }
@@ -160,15 +170,21 @@ class AiBrainRepository @Inject constructor(
             JSONObject(body).optJSONObject("error")?.optString("message") ?: ""
         } catch (e: Exception) { "" }
 
+        // If the body wasn't valid JSON, this response likely didn't come
+        // from Google at all (a carrier/proxy block page, captive portal,
+        // etc). Surfacing a raw snippet makes that visible instead of
+        // hiding it behind a generic "server trouble" message.
+        val rawSnippet = if (errMsg.isBlank() && body.isNotBlank()) " [raw: ${body.take(120)}]" else ""
+
         return when (code) {
             400 -> if (errMsg.contains("API key not valid", true))
                 "That Gemini API key looks invalid, Boss. Please check it in the Admin panel."
-            else "Gemini rejected the request, Boss: ${errMsg.take(100)}"
-            403 -> "Access denied by Gemini, Boss. Your key may not have this model enabled: ${errMsg.take(80)}"
-            404 -> "That model isn't available for this key/region right now, Boss."
-            429 -> "I've hit the Gemini API quota limit, Boss. Try again later or check your Google AI Studio usage."
-            in 500..599 -> "Gemini's servers are having trouble, Boss. Try again in a moment."
-            else -> "Neural link disruption, Boss (HTTP $code): ${errMsg.take(80)}"
+            else "Gemini rejected the request, Boss (HTTP 400): ${errMsg.take(100)}$rawSnippet"
+            403 -> "Access denied by Gemini, Boss (HTTP 403): ${errMsg.take(80)}$rawSnippet"
+            404 -> "That model isn't available for this key/region right now, Boss (HTTP 404).$rawSnippet"
+            429 -> "I've hit the Gemini API quota limit, Boss (HTTP 429). Try again later or check your Google AI Studio usage.$rawSnippet"
+            in 500..599 -> "Gemini's servers are having trouble, Boss (HTTP $code).$rawSnippet"
+            else -> "Neural link disruption, Boss (HTTP $code): ${errMsg.take(80)}$rawSnippet"
         }
     }
 

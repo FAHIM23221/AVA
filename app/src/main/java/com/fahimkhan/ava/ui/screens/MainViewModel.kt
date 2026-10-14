@@ -150,12 +150,20 @@ class MainViewModel @Inject constructor(
             return englishMatch.groupValues[1].trim().takeIf { it.isNotBlank() }
         }
 
-        // Bengali: "X খোলো/খোল", "X ওপেন কর(ো)", "X চালু কর(ো)"
-        val bengaliMatch = Regex(
+        // Bengali, app name first: "X খোলো/খোল", "X ওপেন কর(ো)", "X চালু কর(ো)"
+        val bengaliMatchAppFirst = Regex(
             "^(.+?)\\s*(?:অ্যাপ(?:টি)?)?\\s*(?:ওপেন\\s*কর(?:ো)?|খোল(?:ো)?|চালু\\s*কর(?:ো)?)[।\\.]?$"
         ).find(trimmed)
-        if (bengaliMatch != null) {
-            return bengaliMatch.groupValues[1].trim().takeIf { it.isNotBlank() }
+        if (bengaliMatchAppFirst != null) {
+            return bengaliMatchAppFirst.groupValues[1].trim().takeIf { it.isNotBlank() }
+        }
+
+        // Bengali/transliterated, verb first: "ওপেন X", "ওপেন কর X", "লঞ্চ X", "স্টার্ট X"
+        val bengaliMatchVerbFirst = Regex(
+            "^(?:ওপেন|লঞ্চ|স্টার্ট)\\s*(?:কর(?:ো)?)?\\s+(.+?)[।\\.]?$"
+        ).find(trimmed)
+        if (bengaliMatchVerbFirst != null) {
+            return bengaliMatchVerbFirst.groupValues[1].trim().takeIf { it.isNotBlank() }
         }
 
         return null
