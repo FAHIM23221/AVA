@@ -44,16 +44,22 @@ class AiBrainRepository @Inject constructor(
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
 
-    // Pinned to a specific stable model rather than the "-latest" alias.
+    // Pinned to a specific stable model rather than any "-latest" alias.
     // "-latest" silently follows Google's newest release, and newest often
-    // means a much stingier (or zero) free-tier quota — confirmed by
-    // testing, where "gemini-flash-latest" resolved to gemini-3.8-flash
-    // with only 20 free requests/day. gemini-2.5-flash is Google's current
-    // stable, free-tier-friendly workhorse model (hundreds to ~1500
-    // requests/day free). When Google eventually retires this model,
-    // switch this string to whatever their current stable (non "-latest")
-    // flash model is at that time.
-    private val modelId = "gemini-2.5-flash"
+    // means a much stingier (or zero) free-tier quota — confirmed twice by
+    // direct testing: "gemini-flash-latest" resolved to gemini-3.8-flash
+    // (20 free requests/day), and "gemini-2.5-flash" turned out to be
+    // retired for this project entirely (HTTP 404, "no longer available
+    // to new users"). Verified via curl against this project's actual key
+    // that "gemini-3.5-flash-lite" returns 200 with plain text and no
+    // extra hidden "thinking" tokens (unlike the non-lite preview models,
+    // which burn dozens of reasoning tokens per reply and eat quota
+    // faster). "Lite" models are Google's current high-volume/cheap tier,
+    // which is exactly what a chat companion needs. If this ever gets
+    // retired too, re-run the curl model-list + per-model test in
+    // MOBILE_SETUP_GUIDE_BANGLA.md before picking a replacement — don't
+    // guess from a name alone.
+    private val modelId = "gemini-3.5-flash-lite"
 
     private suspend fun buildSystemPrompt(): String = """
         You are AVA, an advanced AI Companion developed by Fahim Khan.
