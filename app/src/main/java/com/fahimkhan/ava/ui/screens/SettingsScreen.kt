@@ -10,15 +10,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fahimkhan.ava.core.extensions.startAvaService
+import com.fahimkhan.ava.core.extensions.stopAvaService
 import com.fahimkhan.ava.ui.components.CyberCard
 import com.fahimkhan.ava.ui.components.NeonText
 import com.fahimkhan.ava.ui.theme.AvaColors
 
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     var alwaysListening  by remember { mutableStateOf(false) }
     var bengaliEnabled   by remember { mutableStateOf(true) }
     var emotionalMode    by remember { mutableStateOf(true) }
@@ -75,7 +79,14 @@ fun SettingsScreen(onBack: () -> Unit) {
 
                 // Voice settings
                 SettingsSection("VOICE & LANGUAGE", Icons.Rounded.RecordVoiceOver, AvaColors.NeonPink) {
-                    SettingsToggle("Always Listening Mode", "Wake on 'AVA'", alwaysListening) { alwaysListening = it }
+                    SettingsToggle("Always Listening Mode", "Wake on 'AVA' — keeps AVA running after you close the app", alwaysListening) { enabled ->
+                        alwaysListening = enabled
+                        if (enabled) {
+                            context.startAvaService()
+                        } else {
+                            context.stopAvaService()
+                        }
+                    }
                     SettingsToggle("Bengali Language Support", "বাংলায় কথা বলুন", bengaliEnabled) { bengaliEnabled = it }
                     SettingsToggle("ElevenLabs Premium Voice", "Natural AI voice (API key required)", elevenLabsVoice) { elevenLabsVoice = it }
                 }

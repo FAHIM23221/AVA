@@ -18,6 +18,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fahimkhan.ava.ai.memory.ConversationMemory
+import com.fahimkhan.ava.ai.memory.FaceMemory
 import com.fahimkhan.ava.ai.memory.MemoryRepository
 import com.fahimkhan.ava.ui.components.CyberCard
 import com.fahimkhan.ava.ui.components.NeonText
@@ -33,6 +34,7 @@ import javax.inject.Inject
 class MemoryViewModel @Inject constructor(private val repo: MemoryRepository) : ViewModel() {
     val conversations = repo.db.conversationDao().getRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
     val shortTermMems = repo.db.shortTermDao().getRecent().stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
+    val faces = repo.db.faceMemoryDao().getAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(), emptyList())
     fun clearAll() = viewModelScope.launch { repo.clearAll() }
 }
 
@@ -86,7 +88,7 @@ fun MemoryScreen(
             when (selectedTab) {
                 0 -> ConversationList(conversations)
                 1 -> ShortTermList(viewModel)
-                2 -> FaceMemoryList()
+                2 -> FaceMemoryList(viewModel)
             }
         }
     }
@@ -150,8 +152,47 @@ fun ShortTermList(viewModel: MemoryViewModel) {
 }
 
 @Composable
-fun FaceMemoryList() {
-    EmptyMemoryState("No face profiles registered yet.\nUse Vision mode to register trusted people.")
+fun FaceMemoryList(viewModel: MemoryViewModel) {
+    val faces by viewModel.faces.collectAsState()
+    if (faces.isEmpty()) {
+        EmptyMemoryState("No face profiles registered yet.\nUse Vision mode to register trusted people.")
+    } else {
+        LazyColumn(
+            modifier            = Modifier.fillMaxSize(),
+            contentPadding      = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(faces) { face -> FaceCard(face) }
+        }
+    }
+}
+
+@Composable
+fun FaceCard(face: FaceMemory) {
+    val trustColor = when (face.trustLevel) {
+        2 -> AvaColors.Active
+        1 -> AvaColors.OrbListening
+        else -> AvaColors.TextMuted
+    }
+    val trustLabel = when (face.trustLevel) {
+        2 -> "OWNER"
+        1 -> "TRUSTED"
+        else -> "UNKNOWN"
+    }
+    CyberCard(glowColor = trustColor.copy(0.5f)) {
+        Row(
+            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(Icons.Rounded.Face, null, tint = trustColor, modifier = Modifier.size(22.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(face.personName, color = AvaColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(face.relationship, color = AvaColors.TextMuted, fontSize = 11.sp)
+            }
+            Text(trustLabel, color = trustColor, fontSize = 9.sp, letterSpacing = 1.sp, fontWeight = FontWeight.Bold)
+        }
+    }
 }
 
 @Composable

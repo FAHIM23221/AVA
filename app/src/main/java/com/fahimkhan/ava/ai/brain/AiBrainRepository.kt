@@ -47,22 +47,19 @@ class AiBrainRepository @Inject constructor(
     // Pinned to a specific stable model rather than any "-latest" alias.
     // "-latest" silently follows Google's newest release, and newest often
     // means a much stingier (or zero) free-tier quota — confirmed twice by
-    // direct testing: "gemini-flash-latest" resolved to gemini-3.8-flash
-    // (20 free requests/day), and "gemini-2.5-flash" turned out to be
-    // retired for this project entirely (HTTP 404, "no longer available
-    // to new users"). Verified via curl against this project's actual key
-    // that "gemini-3.5-flash-lite" returns 200 with plain text and no
-    // extra hidden "thinking" tokens (unlike the non-lite preview models,
-    // which burn dozens of reasoning tokens per reply and eat quota
-    // faster). "Lite" models are Google's current high-volume/cheap tier,
-    // which is exactly what a chat companion needs. If this ever gets
-    // retired too, re-run the curl model-list + per-model test in
-    // MOBILE_SETUP_GUIDE_BANGLA.md before picking a replacement — don't
-    // guess from a name alone.
+    // direct testing. "gemini-3.5-flash-lite" verified via curl to return
+    // 200 with plain text and no hidden "thinking" tokens. If this ever
+    // gets retired, re-run the curl model-list + per-model test in
+    // MOBILE_SETUP_GUIDE_BANGLA.md before picking a replacement.
     private val modelId = "gemini-3.5-flash-lite"
 
+    // Sent as Gemini's dedicated "systemInstruction" field on EVERY request
+    // (not stuffed into the first chat turn's text, which Gemini treats as
+    // much weaker, easily-forgotten guidance). This is what was causing
+    // AVA to say "I don't have a specific name" — the old approach only
+    // worked for exactly one message before being pushed out of context.
     private suspend fun buildSystemPrompt(): String = """
-        You are AVA, an advanced AI Companion developed by Fahim Khan.
+        You are AVA, an advanced AI Companion developed by Fahim Khan. Your name is AVA — always answer "What is your name?" with "AVA", never "I don't have a name".
         Current personality mode: ${personality.getCurrentModeDescription()}
         Call the user "Boss" 75% of the time, their name 20%, special names 5% (GF mode only).
         Respond in the language the user speaks (Bengali or English).
@@ -86,19 +83,14 @@ class AiBrainRepository @Inject constructor(
         }
 
         try {
-            val promptText = if (conversationHistory.isEmpty()) {
-                "${buildSystemPrompt()}\n\nUser: $userMessage"
-            } else {
-                userMessage
-            }
-
-            var httpResult = callGemini(apiKey, promptText)
+            val systemPrompt = buildSystemPrompt()
+            var httpResult = callGemini(apiKey, systemPrompt, userMessage)
 
             // A 429 can be a brief burst limit rather than a hard daily cap —
             // wait a moment and try exactly once more before giving up.
             if (httpResult is GeminiCallResult.HttpError && httpResult.code == 429) {
                 kotlinx.coroutines.delay(3000)
-                httpResult = callGemini(apiKey, promptText)
+                httpResult = callGemini(apiKey, systemPrompt, userMessage)
             }
 
             when (httpResult) {
@@ -129,15 +121,20 @@ class AiBrainRepository @Inject constructor(
         data class HttpError(val code: Int, val body: String) : GeminiCallResult()
     }
 
-    private fun callGemini(apiKey: String, promptText: String): GeminiCallResult {
+    private fun callGemini(apiKey: String, systemPrompt: String, userMessage: String): GeminiCallResult {
         val contents = JSONArray()
         conversationHistory.forEach { (user, model) ->
             contents.put(turnJson("user", user))
             contents.put(turnJson("model", model))
         }
-        contents.put(turnJson("user", promptText))
+        contents.put(turnJson("user", userMessage))
 
-        val requestBody = JSONObject().apply { put("contents", contents) }
+        val requestBody = JSONObject().apply {
+            put("contents", contents)
+            put("systemInstruction", JSONObject().apply {
+                put("parts", JSONArray().put(JSONObject().put("text", systemPrompt)))
+            })
+        }
 
         val request = Request.Builder()
             .url("https://generativelanguage.googleapis.com/v1beta/models/$modelId:generateContent")
@@ -176,10 +173,6 @@ class AiBrainRepository @Inject constructor(
             JSONObject(body).optJSONObject("error")?.optString("message") ?: ""
         } catch (e: Exception) { "" }
 
-        // If the body wasn't valid JSON, this response likely didn't come
-        // from Google at all (a carrier/proxy block page, captive portal,
-        // etc). Surfacing a raw snippet makes that visible instead of
-        // hiding it behind a generic "server trouble" message.
         val rawSnippet = if (errMsg.isBlank() && body.isNotBlank()) " [raw: ${body.take(120)}]" else ""
 
         return when (code) {

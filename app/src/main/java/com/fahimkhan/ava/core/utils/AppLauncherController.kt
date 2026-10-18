@@ -39,15 +39,58 @@ class AppLauncherController @Inject constructor(
         }.distinctBy { it.packageName }
     }
 
+    // Common Bengali names/transliterations for popular apps. Bengali script
+    // and Latin script never share characters, so a plain "contains" match
+    // against the installed app's (Latin) label can never succeed on its
+    // own — this table bridges that gap for the apps people actually ask
+    // for by voice. Extend as needed; anything not listed here still works
+    // fine if spoken in English/the app's actual name.
+    private val bengaliAppNames = mapOf(
+        "ইউটিউব" to "youtube",
+        "ফেসবুক" to "facebook",
+        "হোয়াটসঅ্যাপ" to "whatsapp",
+        "ওয়াটসঅ্যাপ" to "whatsapp",
+        "ইনস্টাগ্রাম" to "instagram",
+        "মেসেঞ্জার" to "messenger",
+        "ক্যামেরা" to "camera",
+        "গ্যালারি" to "gallery",
+        "সেটিংস" to "settings",
+        "ক্রোম" to "chrome",
+        "ব্রাউজার" to "chrome",
+        "ক্যালকুলেটর" to "calculator",
+        "ক্যালেন্ডার" to "calendar",
+        "জিমেইল" to "gmail",
+        "ইমেইল" to "gmail",
+        "ম্যাপ" to "maps",
+        "মানচিত্র" to "maps",
+        "প্লে স্টোর" to "play store",
+        "টেলিগ্রাম" to "telegram",
+        "টিকটক" to "tiktok",
+        "স্পটিফাই" to "spotify",
+        "ফোন" to "phone",
+        "ডায়াল" to "phone",
+        "মেসেজ" to "messages",
+        "এসএমএস" to "messages"
+    )
+
+    private fun normalizeAppQuery(spokenName: String): String {
+        val trimmed = spokenName.trim()
+        // Check whole-phrase match first (handles multi-word entries like "প্লে স্টোর").
+        bengaliAppNames[trimmed]?.let { return it }
+        // Otherwise swap any individual Bengali words we recognize, leaving
+        // anything else (including already-English text) untouched.
+        return trimmed.split(" ").joinToString(" ") { word -> bengaliAppNames[word] ?: word }
+    }
+
     /**
      * Finds the best-matching installed app for a spoken name and launches it.
      * Matching is tolerant: exact label match wins, then "contains" in either
-     * direction, so "ইউটিউব" matches "YouTube" is NOT possible by text alone —
-     * callers should pass the Latin/English app name where possible; common
-     * Bengali app nicknames are normalized by the caller before this is invoked.
+     * direction. Common Bengali app names are translated to their English
+     * equivalent first via [normalizeAppQuery], since Bengali script can
+     * never textually match a Latin-script app label.
      */
     fun launchApp(spokenName: String): LaunchResult {
-        val query = spokenName.trim().lowercase()
+        val query = normalizeAppQuery(spokenName).trim().lowercase()
         if (query.isBlank()) return LaunchResult.NotFound(spokenName, emptyList())
 
         val apps = getLaunchableApps()

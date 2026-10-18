@@ -29,8 +29,18 @@ class AvaForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START            -> observeWakeWords()
-            ACTION_STOP             -> stopSelf()
+            // ACTION_START is what actually keeps AVA listening in the
+            // background after the app UI is closed — it both subscribes
+            // to wake-word detections AND starts the recognizer itself.
+            // (Previously this only subscribed and never started
+            // listening, so "Always Listening Mode" did nothing.)
+            ACTION_START -> {
+                observeWakeWords()
+                alwaysListeningEnabled = true
+                wakeWordDetector.startContinuousListening()
+                updateNotification()
+            }
+            ACTION_STOP -> stopSelf()
             ACTION_TOGGLE_LISTENING -> toggleAlwaysListening()
         }
         return START_STICKY
