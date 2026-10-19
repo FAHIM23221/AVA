@@ -137,33 +137,51 @@ class MainViewModel @Inject constructor(
         return null
     }
 
-    /** Pulls an app name out of common open/launch phrasing, English + Bengali. */
+    /**
+     * Pulls an app name out of open/launch phrasing, English + Bengali.
+     * Unanchored (uses find(), not matchEntire()) so this also catches an
+     * app-open instruction embedded inside a longer sentence, e.g.
+     * "ইউটিউব ওপেন করে একটা রেন্ডম ভিডিও চালাও" — previously this only
+     * matched when the ENTIRE message was just the open command, so any
+     * trailing instruction (however AVA then can't actually carry out)
+     * silently skipped the whole app-launch step and went to chat instead.
+     */
     private fun extractAppLaunchTarget(text: String): String? {
         val trimmed = text.trim()
 
-        // English: "open X", "launch X", "start X app"
+        // English: "open X", "launch X", "start X app" — stops at a
+        // connector word so "open youtube and play a video" still yields
+        // just "youtube".
         val englishMatch = Regex(
-            "^(?:open|launch|start)\\s+(.+?)(?:\\s+app)?$",
+            "\\b(?:open|launch|start)\\s+(\\S+(?:\\s+\\S+)?)",
             RegexOption.IGNORE_CASE
         ).find(trimmed)
         if (englishMatch != null) {
-            return englishMatch.groupValues[1].trim().takeIf { it.isNotBlank() }
+            val candidate = englishMatch.groupValues[1]
+                .split(Regex("\\b(?:and|then)\\b", RegexOption.IGNORE_CASE)).first()
+                .trim()
+            if (candidate.isNotBlank()) return candidate
         }
 
-        // Bengali, app name first: "X খোলো/খোল", "X ওপেন কর(ো)", "X চালু কর(ো)"
+        // Bengali, app name first: "X খোলো/খোল", "X ওপেন কর(ো/ে)", "X চালু কর(ো/ে)"
+        // — found anywhere in the sentence, not just when it's the whole message.
         val bengaliMatchAppFirst = Regex(
-            "^(.+?)\\s*(?:অ্যাপ(?:টি)?)?\\s*(?:ওপেন\\s*কর(?:ো)?|খোল(?:ো)?|চালু\\s*কর(?:ো)?)[।\\.]?$"
+            "(\\S+(?:\\s+\\S+)?)\\s*(?:অ্যাপ(?:টি)?)?\\s*(?:ওপেন\\s*কর(?:ো|ে)?|খোল(?:ো)?|চালু\\s*কর(?:ো|ে)?)"
         ).find(trimmed)
         if (bengaliMatchAppFirst != null) {
-            return bengaliMatchAppFirst.groupValues[1].trim().takeIf { it.isNotBlank() }
+            val candidate = bengaliMatchAppFirst.groupValues[1].trim()
+            if (candidate.isNotBlank()) return candidate
         }
 
-        // Bengali/transliterated, verb first: "ওপেন X", "ওপেন কর X", "লঞ্চ X", "স্টার্ট X"
+        // Bengali/transliterated, verb first: "ওপেন X", "ওপেন কর X", "লঞ্চ X", "স্টার্ট X".
+        // Only takes one token here (not 1-2 like above) so a trailing
+        // connector word like "তারপর" never gets swept into the app name.
         val bengaliMatchVerbFirst = Regex(
-            "^(?:ওপেন|লঞ্চ|স্টার্ট)\\s*(?:কর(?:ো)?)?\\s+(.+?)[।\\.]?$"
+            "(?:ওপেন|লঞ্চ|স্টার্ট)\\s*(?:কর(?:ো|ে)?)?\\s+(\\S+)"
         ).find(trimmed)
         if (bengaliMatchVerbFirst != null) {
-            return bengaliMatchVerbFirst.groupValues[1].trim().takeIf { it.isNotBlank() }
+            val candidate = bengaliMatchVerbFirst.groupValues[1].trim()
+            if (candidate.isNotBlank()) return candidate
         }
 
         return null

@@ -8,6 +8,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.fahimkhan.ava.core.extensions.isBengali
 import com.fahimkhan.ava.core.utils.ApiKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -53,6 +54,10 @@ class VoiceEngine @Inject constructor(
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
+            // Default to English; the actual locale is now chosen per
+            // message in speakWithAndroidTts() based on the text's
+            // language, since a response can switch between Bengali and
+            // English turn to turn.
             androidTts?.language = Locale.US
             androidTts?.setSpeechRate(0.95f)
             androidTts?.setPitch(0.9f)
@@ -110,8 +115,46 @@ class VoiceEngine @Inject constructor(
 
     private fun speakWithAndroidTts(text: String) {
         if (!ttsReady) return
-        androidTts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "AVA_${System.currentTimeMillis()}")
+
+        // Pick the TTS voice/locale to match THIS message's language —
+        // previously this was set once at startup to US English and never
+        // changed, so Bengali replies were read with an English voice
+        // engine, badly mangling pronunciation (e.g. "আভা" coming out as
+        // "Eva"/"Yeva"). A Bengali voice may not be installed on every
+        // device; if setting it fails/is unsupported, fall back to
+        // whatever was already active rather than silently saying nothing.
+        val bengali = text.isBengali()
+        val targetLocale = if (bengali) Locale("bn", "BD") else Locale.US
+        val result = androidTts?.setLanguage(targetLocale)
+        if (bengali && (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED)) {
+            // No Bengali voice installed on this device — try the generic
+            // Bengali locale (no country) before giving up and speaking
+            // with whatever voice is already active.
+            androidTts?.setLanguage(Locale("bn"))
+        }
+
+        val spokenText = if (bengali) normalizeForBengaliSpeech(text) else text
+        androidTts?.speak(spokenText, TextToSpeech.QUEUE_FLUSH, null, "AVA_${System.currentTimeMillis()}")
         scope.launch { _audioLevelFlow.value = 0.6f; delay(text.length * 60L); _audioLevelFlow.value = 0f }
+    }
+
+    // Words that read fine in an English sentence but get mispronounced by
+    // a Bengali TTS voice when left in Latin script (it tries to sound out
+    // English letters using Bengali phonetics). Swapping in the Bengali
+    // spelling fixes pronunciation without changing what's shown on screen
+    // or saved to memory — this only affects what's sent to the speech
+    // engine.
+    private val bengaliSpeechSubstitutions = listOf(
+        "\\bAVA\\b".toRegex(RegexOption.IGNORE_CASE) to "আভা",
+        "\\bBoss\\b".toRegex(RegexOption.IGNORE_CASE) to "বস"
+    )
+
+    private fun normalizeForBengaliSpeech(text: String): String {
+        var result = text
+        bengaliSpeechSubstitutions.forEach { (pattern, replacement) ->
+            result = result.replace(pattern, replacement)
+        }
+        return result
     }
 
     private suspend fun speakWithElevenLabs(text: String) = withContext(Dispatchers.IO) {
