@@ -60,6 +60,33 @@ class MainViewModel @Inject constructor(
                 }
             }
         }
+        // Covers the case where the app is already open (foreground or
+        // kept alive in the background) and the wake word fires again —
+        // start listening immediately instead of waiting for a tap.
+        viewModelScope.launch {
+            wakeWord.wakeWordDetected.collect { startListeningFromWakeWord() }
+        }
+    }
+
+    /**
+     * Called when "AVA" is detected — either by the collector above (app
+     * already running) or directly from MainActivity when it's freshly
+     * launched by AvaForegroundService's wake-word trigger (that launch
+     * can race ahead of this ViewModel being created, so the activity
+     * calls this explicitly rather than relying only on the flow
+     * collector above). If RECORD_AUDIO weren't already granted, the
+     * background wake-word listening that led here couldn't have
+     * started in the first place, so no extra permission check is
+     * needed before starting the microphone.
+     */
+    fun startListeningFromWakeWord() {
+        if (isProcessing || isListening) return
+        isListening = true
+        viewModelScope.launch {
+            _orbState.value = OrbState.LISTENING
+            _subtitleText.value = "Listening..."
+            voiceEngine.startListening()
+        }
     }
 
     private fun greetUser() = viewModelScope.launch {
@@ -113,6 +140,22 @@ class MainViewModel @Inject constructor(
      * be sent to Gemini instead.
      */
     private suspend fun handleDeviceCommand(input: String): String? {
+        // Checked before the generic app-launch match below: "ইউটিউব ওপেন
+        // করে ... ভিডিও চালাও" / "open youtube and play a video" mentions
+        // both YouTube and a play/video action, so it's worth a direct
+        // search-results deep link instead of just a cold app launch.
+        val youtubeQuery = extractYouTubeVideoQuery(input)
+        if (youtubeQuery != null) {
+            val bengali = input.isBengali()
+            return when (val result = appLauncher.launchYouTubeSearch(youtubeQuery)) {
+                is LaunchResult.Success ->
+                    if (bengali) "YouTube-এ '$youtubeQuery' সার্চ করে দেখাচ্ছি, Boss। প্রথম ভিডিওটা ট্যাপ করলেই চলবে।"
+                    else "Showing '$youtubeQuery' results on YouTube, Boss. Tap the first one to play it."
+                is LaunchResult.NotFound ->
+                    if (bengali) "YouTube খুলতে পারলাম না, Boss।" else "I couldn't open YouTube, Boss."
+            }
+        }
+
         val appName = extractAppLaunchTarget(input)
         if (appName != null) {
             val bengali = input.isBengali()
@@ -135,6 +178,37 @@ class MainViewModel @Inject constructor(
         if (deviceResponse.isNotBlank()) return deviceResponse
 
         return null
+    }
+
+    // Filler words that carry no real search meaning on their own —
+    // stripped out when building a YouTube search query so "একটা রেন্ডম
+    // ভিডিও চালাও" doesn't end up searching for the literal word "random".
+    private val youtubeFillerWords = setOf(
+        "একটা", "একটি", "কোনো", "রেন্ডম", "random", "a", "an", "the", "video", "ভিডিও",
+        "চালাও", "চালান", "প্লে", "play", "ওপেন", "open", "করে", "কর", "করো", "then", "and", "তারপর", "এবং"
+    )
+
+    /**
+     * Returns a YouTube search query if [text] asks to open YouTube AND
+     * play/watch a video, or null if it's not that kind of request. Pulls
+     * out whatever's left after stripping YouTube's name and the generic
+     * play/video filler words; if nothing meaningful remains (e.g. "play
+     * a random video" really is just "anything"), falls back to a
+     * generic "trending" search rather than failing outright.
+     */
+    private fun extractYouTubeVideoQuery(text: String): String? {
+        val lower = text.lowercase()
+        val mentionsYouTube = lower.contains("youtube") || lower.contains("ইউটিউব")
+        val mentionsPlay = listOf("video", "ভিডিও", "চালাও", "চালান", "play", "প্লে").any { lower.contains(it) }
+        if (!mentionsYouTube || !mentionsPlay) return null
+
+        val remainder = text.split(Regex("\\s+"))
+            .filterNot { word -> youtubeFillerWords.any { filler -> word.equals(filler, ignoreCase = true) } }
+            .filterNot { it.contains("youtube", ignoreCase = true) || it.contains("ইউটিউব") }
+            .joinToString(" ")
+            .trim()
+
+        return remainder.ifBlank { "trending" }
     }
 
     /**

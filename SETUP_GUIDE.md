@@ -205,43 +205,6 @@ AVA auto-detects language from user input and responds accordingly.
 
 ---
 
-## 📦 AUTO ZIP EXTRACT (GitHub Actions)
-
-A GitHub Actions workflow unpacks any `.zip` automatically — no manual unzipping needed.
-
-**What happens when a `.zip` arrives**
-
-| | |
-|---|---|
-| 📂 **যেখানে বসবে** | zip-এর ভেতরের ফাইলগুলো সরাসরি repo root-এ বসে (আলাদা `zip-নাম/` ফোল্ডার থাকে না) |
-| ✂️ **একটাই ফোল্ডার থাকলে** | zip-এর ভেতরের একমাত্র ফোল্ডারটা (যেমন `AVA/`) খুলে ফেলা হয় — ফাইলগুলো flat হয়ে root-এ বসে |
-| 🔄 **একই নামের ফাইল** | নতুন zip-এর ভার্সন দিয়ে replace হয় |
-| 🗑️ **পুরোনো ফাইল** | আগের extraction-এ আসা কিন্তু নতুন zip-এ নেই এমন ফাইল নিজে থেকেই মুছে যায় (খালি ফোল্ডারও সরে যায়) |
-| 📦 **zip ফাইলটি** | extract সফল হওয়ার পর নিজে থেকেই মুছে যায় |
-
-**কখন কী ঘটে**
-
-| ZIP কোথায় আসে | ফলাফল |
-|---|---|
-| রিপোজিটরিতে push / upload | repo root-এ extract হয়, ফাইলগুলো ব্রাঞ্চে commit হয়, zip মুছে যায় |
-| Release-এ attach | `releases/<tag>/<name>/` এ extract হয় এবং `<name>-extracted.zip` হিসেবে release-এ আবার attach হয় |
-| Actions → **Auto Extract ZIP** → *Run workflow* | ম্যানুয়ালি চালানো যায় (ঐচ্ছিক: সরাসরি `.zip` URL, আর zip রেখে দেওয়ার অপশন) |
-
-**ফলাফল কোথায় পাবেন**
-- **Repository** — extract করা ফাইলগুলো ব্রাঞ্চে commit হয়ে যায়
-- **Actions → run summary** — কোন ফাইল added / modified / deleted হলো তার তালিকা
-- **Actions → Artifacts** — `extracted-files-<run number>` (kept 30 days)
-
-**সুরক্ষা**
-- `../` বা absolute path থাকা archive বাদ দেওয়া হয় (zip-slip guard)
-- repo-র নিজস্ব ফাইলগুলো কখনো মুছে ফেলা হয় না
-- অটোমেটেশনের নিজস্ব ফাইল (`auto-extract-zip.yml`, `extract-zips.sh`) সুরক্ষিত
-- auto-commit-এর মেসেজে `[skip actions]` থাকে, তাই কোনো rebuild লুপ হয় না
-- ফাইল: `.github/workflows/auto-extract-zip.yml`, `.github/scripts/extract-zips.sh`
-- ব্যবহারের হিসাব রাখা হয় `.github/auto-extract-manifest.tsv` ও `.github/auto-extract-baseline.txt`-এ
-
----
-
 ## 🚀 BUILD & RUN
 
 ```bash
