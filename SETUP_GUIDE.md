@@ -205,6 +205,20 @@ AVA auto-detects language from user input and responds accordingly.
 
 ---
 
+## 📦 AUTO ZIP EXTRACT (GitHub Actions)
+
+এই repository-তে যেকোনো `.zip` আপলোড করলেই সেটি **স্বয়ংক্রিয়ভাবে extract** হয়ে যায়:
+
+- zip-এর ফাইলগুলো সরাসরি **repo root-এ** বসে (আলাদা zip-নাম ফোল্ডার নেই)
+- zip-এর ভেতরে একটাই ফোল্ডার থাকলে সেটা খুলে ফেলা হয় (flat হয়ে বসে)
+- একই নামের ফাইল **replace** হয়
+- আগের extraction-এ আসা পুরোনো ফাইল **নিজে থেকেই মুছে যায়**
+- আপলোড করা zip ফাইলটিও **নিজে থেকেই মুছে যায়**
+
+বিস্তারিত → **`.github/AUTO-EXTRACT.md`**
+
+---
+
 ## 🚀 BUILD & RUN
 
 ```bash
