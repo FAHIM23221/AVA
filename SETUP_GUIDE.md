@@ -205,6 +205,29 @@ AVA auto-detects language from user input and responds accordingly.
 
 ---
 
+## 📦 AUTO ZIP EXTRACT (GitHub Actions)
+
+A GitHub Actions workflow unpacks any `.zip` automatically — no manual unzipping needed.
+
+| How the ZIP arrives | What happens |
+|---|---|
+| You push / upload a `.zip` into the repository | It is extracted next to itself (`app.zip` → `app/`) and the extracted files are committed back to the branch |
+| You attach a `.zip` to a GitHub Release | It is extracted into `releases/<tag>/<name>/` and re-attached to the release as `<name>-extracted.zip` |
+| Actions → **Auto Extract ZIP** → *Run workflow* | Runs manually; you can also paste a direct `.zip` URL |
+
+**Where to find the result**
+- **Repository** — the extracted folder is committed to the branch
+- **Actions → run summary** — lists every extracted folder
+- **Actions → Artifacts** — `extracted-files-<run number>` (kept 30 days)
+
+**Good to know**
+- Archives containing `../` or absolute paths are rejected (safety guard)
+- The auto-commit ends with `[skip actions]`, so it never causes a rebuild loop
+- The original `.zip` stays in the repository
+- Files: `.github/workflows/auto-extract-zip.yml` and `.github/scripts/extract-zips.sh`
+
+---
+
 ## 🚀 BUILD & RUN
 
 ```bash
