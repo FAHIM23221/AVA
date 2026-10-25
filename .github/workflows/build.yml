@@ -8,10 +8,6 @@ on:
     branches: [ main, master ]
   workflow_dispatch:   # lets you click "Run workflow" manually from the Actions tab
 
-permissions:
-  contents: read
-  issues: write
-
 jobs:
   build:
     name: Build Debug APK
@@ -49,30 +45,6 @@ jobs:
           path: build-log.txt
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Report build failure
-        if: failure()
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo "### ❌ Build failed — ${GITHUB_SHA:0:7}"
-            echo
-            echo '```'
-            grep -aE "^e: |error:|FAILURE:|What went wrong|Execution failed|> Task .*FAILED|Caused by:" build-log.txt | head -40 || true
-            echo '```'
-            echo
-            echo '<details><summary>full log</summary>'
-            echo
-            echo '```'
-            tail -c 6000 build-log.txt || true
-            echo '```'
-            echo '</details>'
-          } > /tmp/report.md
-          gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "Build failed: ${GITHUB_SHA:0:7}" \
-            --body-file /tmp/report.md || true
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
