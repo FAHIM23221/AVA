@@ -3,7 +3,9 @@ package com.fahimkhan.ava.core.utils
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -119,5 +121,37 @@ class AppLauncherController @Inject constructor(
             .take(3)
 
         return LaunchResult.NotFound(spokenName, suggestions)
+    }
+
+    /**
+     * Opens YouTube directly to search results for [query] (deep-linked
+     * into the YouTube app itself when it's installed, not a browser),
+     * which gets AVA from "cold-opened the app and stopped" to "one tap
+     * away from the actual video" — a plain launch intent has no way to
+     * pick and auto-play a specific video without Google's separate
+     * YouTube Data API (its own API key, quota, and a real search call),
+     * which is a bigger, separate piece of work than this.
+     */
+    fun launchYouTubeSearch(query: String): LaunchResult {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$encoded")).apply {
+            setPackage("com.google.android.youtube")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return try {
+            context.startActivity(intent)
+            LaunchResult.Success("YouTube")
+        } catch (e: Exception) {
+            // YouTube app not installed — fall back to opening the same
+            // search in whatever browser is available.
+            try {
+                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=$encoded"))
+                    .apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                context.startActivity(webIntent)
+                LaunchResult.Success("YouTube")
+            } catch (e2: Exception) {
+                LaunchResult.NotFound("YouTube", emptyList())
+            }
+        }
     }
 }

@@ -14,17 +14,57 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.fahimkhan.ava.core.extensions.startAvaService
 import com.fahimkhan.ava.core.extensions.stopAvaService
+import com.fahimkhan.ava.core.utils.ApiKeyStore
 import com.fahimkhan.ava.ui.components.CyberCard
 import com.fahimkhan.ava.ui.components.NeonText
 import com.fahimkhan.ava.ui.theme.AvaColors
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+data class SpokenLanguageOption(val label: String, val tag: String)
+
+val spokenLanguageOptions = listOf(
+    SpokenLanguageOption("বাংলা (Bengali)",      "bn-BD"),
+    SpokenLanguageOption("English",               "en-US"),
+    SpokenLanguageOption("हिन्दी (Hindi)",         "hi-IN"),
+    SpokenLanguageOption("Bahasa Indonesia",       "id-ID"),
+    SpokenLanguageOption("اردو (Urdu)",            "ur-PK"),
+    SpokenLanguageOption("العربية (Arabic)",        "ar-SA"),
+)
+
+@HiltViewModel
+class SettingsViewModel @Inject constructor(
+    private val apiKeyStore: ApiKeyStore
+) : ViewModel() {
+    private val _recognitionLanguage = MutableStateFlow("bn-BD")
+    val recognitionLanguage = _recognitionLanguage.asStateFlow()
+
+    init {
+        viewModelScope.launch { _recognitionLanguage.value = apiKeyStore.getRecognitionLanguage() }
+    }
+
+    fun setRecognitionLanguage(tag: String) {
+        _recognitionLanguage.value = tag
+        viewModelScope.launch { apiKeyStore.saveRecognitionLanguage(tag) }
+    }
+}
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onBack: () -> Unit
+) {
     val context = LocalContext.current
+    val recognitionLanguage by viewModel.recognitionLanguage.collectAsState()
     var alwaysListening  by remember { mutableStateOf(false) }
-    var bengaliEnabled   by remember { mutableStateOf(true) }
     var emotionalMode    by remember { mutableStateOf(true) }
     var elevenLabsVoice  by remember { mutableStateOf(false) }
     var darkOverlay      by remember { mutableStateOf(false) }
@@ -87,8 +127,35 @@ fun SettingsScreen(onBack: () -> Unit) {
                             context.stopAvaService()
                         }
                     }
-                    SettingsToggle("Bengali Language Support", "বাংলায় কথা বলুন", bengaliEnabled) { bengaliEnabled = it }
                     SettingsToggle("ElevenLabs Premium Voice", "Natural AI voice (API key required)", elevenLabsVoice) { elevenLabsVoice = it }
+
+                    Spacer(Modifier.height(10.dp))
+                    Text("SPOKEN LANGUAGE", color = AvaColors.TextSecondary, fontSize = 11.sp, letterSpacing = 1.sp)
+                    Text(
+                        "AVA listens for one language at a time — pick the one you'll actually speak. There's no automatic \"detect any language\" without a paid cloud speech service.",
+                        color = AvaColors.TextMuted, fontSize = 9.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        spokenLanguageOptions.forEach { option ->
+                            val active = option.tag == recognitionLanguage
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (active) AvaColors.NeonPink.copy(0.12f) else AvaColors.DarkSurface,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .border(1.dp, if (active) AvaColors.NeonPink else AvaColors.ElevatedSurface, RoundedCornerShape(8.dp))
+                                    .clickable { viewModel.setRecognitionLanguage(option.tag) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(option.label, color = if (active) AvaColors.NeonPink else AvaColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                if (active) Icon(Icons.Rounded.CheckCircle, null, tint = AvaColors.NeonPink, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
                 }
 
                 // AI behaviour

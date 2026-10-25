@@ -1,5 +1,6 @@
 package com.fahimkhan.ava.ui.screens
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -34,12 +35,32 @@ class MainActivity : ComponentActivity() {
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { mainViewModel.isLoading.value }
         super.onCreate(savedInstanceState)
+        handleWakeWordLaunch(intent)
         setContent {
             AvaTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = AvaColors.BlackAbyss) {
                     AvaNavGraph()
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWakeWordLaunch(intent)
+    }
+
+    /**
+     * AvaForegroundService launches/brings forward this Activity with
+     * FLAG_ACTIVITY_SINGLE_TOP when the wake word fires, which means an
+     * already-running Activity gets onNewIntent() instead of onCreate()
+     * — both paths are handled here so "AVA" reliably starts listening
+     * immediately instead of requiring a manual tap afterward.
+     */
+    private fun handleWakeWordLaunch(intent: Intent?) {
+        if (intent?.getBooleanExtra("WAKE_WORD_TRIGGERED", false) == true) {
+            mainViewModel.startListeningFromWakeWord()
         }
     }
 }

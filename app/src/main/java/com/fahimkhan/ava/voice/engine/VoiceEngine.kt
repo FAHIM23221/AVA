@@ -90,11 +90,21 @@ class VoiceEngine @Inject constructor(
         }
     }
 
-    /** Must be called only after RECORD_AUDIO permission has been granted. */
-    fun startListening() {
+    /**
+     * Must be called only after RECORD_AUDIO permission has been granted.
+     * Listens in whichever single language is set in Settings → Voice &
+     * Language (ApiKeyStore.getRecognitionLanguage(), default "bn-BD").
+     * Android's on-device recognizer can only target one language per
+     * session — there's no built-in "detect whatever language was
+     * spoken" the way some cloud speech services offer — so if the
+     * person switches languages often, they need to change this setting
+     * to match, rather than it being guessed automatically.
+     */
+    suspend fun startListening() {
+        val languageTag = apiKeyStore.getRecognitionLanguage()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "bn-BD")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
             putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
@@ -132,10 +142,34 @@ class VoiceEngine @Inject constructor(
             // with whatever voice is already active.
             androidTts?.setLanguage(Locale("bn"))
         }
+        preferFemaleVoice(targetLocale)
 
         val spokenText = if (bengali) normalizeForBengaliSpeech(text) else text
         androidTts?.speak(spokenText, TextToSpeech.QUEUE_FLUSH, null, "AVA_${System.currentTimeMillis()}")
         scope.launch { _audioLevelFlow.value = 0.6f; delay(text.length * 60L); _audioLevelFlow.value = 0f }
+    }
+
+    // Best-effort pick of a female-sounding voice for the given locale.
+    // Android's TextToSpeech.Voice has no standard "gender" field — this
+    // is a heuristic based on how Google's and most third-party TTS
+    // engines name their voices (e.g. "bn-bd-x-bnd-local", "en-us-x-sfg
+    // -local#female_1"). It only changes anything if the installed engine
+    // actually ships more than one voice for this locale; many devices
+    // only have one. For a guaranteed, consistently good female voice —
+    // the "MYRA sounds cuter" difference — the reliable fix is enabling
+    // ElevenLabs in the Admin panel (API CONFIGURATION), which lets you
+    // pick an exact voice instead of whatever the phone happens to ship.
+    private fun preferFemaleVoice(locale: Locale) {
+        try {
+            val voices = androidTts?.voices ?: return
+            val candidate = voices.firstOrNull { voice ->
+                voice.locale.language == locale.language &&
+                    (voice.name.contains("female", ignoreCase = true) ||
+                     voice.name.contains("#female", ignoreCase = true) ||
+                     voice.name.contains("_f_", ignoreCase = true))
+            }
+            if (candidate != null) androidTts?.voice = candidate
+        } catch (e: Exception) { /* engine doesn't expose voice list; keep default */ }
     }
 
     // Words that read fine in an English sentence but get mispronounced by

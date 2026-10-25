@@ -28,6 +28,7 @@ class ApiKeyStore @Inject constructor(
         val ELEVENLABS_KEY    = stringPreferencesKey("elevenlabs_api_key")
         val ELEVENLABS_VOICE  = stringPreferencesKey("elevenlabs_voice_id")
         val USE_ELEVENLABS    = booleanPreferencesKey("use_elevenlabs")
+        val RECOGNITION_LANG  = stringPreferencesKey("recognition_language")
     }
 
     private fun isPlaceholder(value: String) =
@@ -67,6 +68,23 @@ class ApiKeyStore @Inject constructor(
             it[Keys.ELEVENLABS_VOICE] = voiceId.trim()
             it[Keys.USE_ELEVENLABS]   = enabled
         }
+    }
+
+    /**
+     * The BCP-47 tag SpeechRecognizer should listen for (e.g. "bn-BD",
+     * "en-US", "id-ID"). Previously this was hardcoded to Bengali
+     * everywhere, so speaking any other language (Indonesian, Hindi,
+     * plain English, etc.) was never recognized correctly. Android's
+     * on-device recognizer only understands ONE language per session —
+     * there's no true "auto-detect any spoken language" without a paid
+     * cloud speech API — so this makes that one language a setting
+     * instead of a hardcoded guess.
+     */
+    suspend fun getRecognitionLanguage(): String =
+        context.apiKeyDataStore.data.first()[Keys.RECOGNITION_LANG] ?: "bn-BD"
+
+    suspend fun saveRecognitionLanguage(languageTag: String) {
+        context.apiKeyDataStore.edit { it[Keys.RECOGNITION_LANG] = languageTag.trim() }
     }
 
     /** Masked preview for display in Admin panel, e.g. "AIza••••••••7f2a" */

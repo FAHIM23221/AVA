@@ -27,7 +27,7 @@ object AppModule {
     @Provides @Singleton fun provideApiKeyStore(@ApplicationContext ctx: Context) = ApiKeyStore(ctx)
     @Provides @Singleton fun provideAiBrainRepository(@ApplicationContext ctx: Context, p: PersonalityEngine, m: MemoryRepository, keys: ApiKeyStore) = AiBrainRepository(ctx, p, m, keys)
     @Provides @Singleton fun provideVoiceEngine(@ApplicationContext ctx: Context, keys: ApiKeyStore) = VoiceEngine(ctx, keys)
-    @Provides @Singleton fun provideWakeWordDetector(@ApplicationContext ctx: Context) = WakeWordDetector(ctx)
+    @Provides @Singleton fun provideWakeWordDetector(@ApplicationContext ctx: Context, keys: ApiKeyStore) = WakeWordDetector(ctx, keys)
     @Provides @Singleton fun provideOwnerSecuritySystem(@ApplicationContext ctx: Context, m: MemoryRepository) = OwnerSecuritySystem(ctx, m)
     @Provides @Singleton fun provideAdminRepository(m: MemoryRepository, @ApplicationContext ctx: Context) = AdminRepository(m, ctx)
 }
