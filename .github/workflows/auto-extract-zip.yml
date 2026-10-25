@@ -6,7 +6,7 @@ name: Auto Extract ZIP
 
 on:
   push:
-    branches: [ main, master ]
+    # Any branch — a ZIP uploaded to main or to a feature branch is extracted.
     paths:
       - '*.zip'
       - '**/*.zip'
