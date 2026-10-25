@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AVA</string>
+    <string name="app_full_name">AVA — AI Companion</string>
+    <string name="developer_name">Fahim Khan</string>
+    <string name="developer_credit">Developed by Fahim Khan</string>
+    <string name="wake_word">AVA</string>
+    <string name="channel_foreground_name">AVA — Always On</string>
+    <string name="channel_foreground_desc">AVA is active and listening</string>
+    <string name="notification_title">AVA — AI Companion</string>
+    <string name="notification_text">Neural core active</string>
+    <string name="listening_text">Listening...</string>
+    <string name="thinking_text">Processing...</string>
+    <string name="speaking_text">Speaking...</string>
+    <string name="idle_text">Tap to speak</string>
+</resources>
