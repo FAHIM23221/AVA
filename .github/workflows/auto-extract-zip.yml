@@ -1,8 +1,14 @@
 name: Auto Extract ZIP
 
-# Whenever a .zip file shows up in this repository (pushed / uploaded through the
-# GitHub web UI, a PR, or a release asset) the archive is unpacked automatically
-# and the extracted files are published back into the repository.
+# Whenever a .zip shows up in this repository (pushed / uploaded through the
+# GitHub web UI, a PR, or a release asset) the archive is unpacked automatically:
+#
+#   * the files land directly in the place the archive lives (repo root),
+#   * a single top level folder inside the archive is stripped,
+#   * files with the same name are replaced,
+#   * files of the previous extraction that are gone in the new archive are
+#     removed automatically,
+#   * the uploaded archive itself is deleted afterwards.
 
 on:
   push:
@@ -17,6 +23,11 @@ on:
       source_url:
         description: 'Optional: direct URL of a .zip to extract (leave empty to scan the repository)'
         required: false
+        type: string
+      keep_archive:
+        description: 'Keep the uploaded .zip after extraction (1 = yes, 0 = no)'
+        required: false
+        default: '0'
         type: string
 
 permissions:
@@ -47,7 +58,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           SOURCE_URL: ${{ inputs.source_url }}
+          KEEP_ARCHIVE: ${{ inputs.keep_archive }}
           OUTPUT_LIST_FILE: ${{ runner.temp }}/extracted-dirs.txt
+          REPORT_FILE: ${{ runner.temp }}/extract-report.txt
         run: bash .github/scripts/extract-zips.sh
 
       - name: Collect extracted folders
@@ -121,7 +134,11 @@ jobs:
           {
             echo '## 🗜️ ZIP auto-extract'
             echo
-            if [ -s "${{ runner.temp }}/extracted-dirs.txt" ]; then
+            if [ -s "${{ runner.temp }}/extract-report.txt" ]; then
+              echo '```'
+              cat "${{ runner.temp }}/extract-report.txt"
+              echo '```'
+            elif [ -s "${{ runner.temp }}/extracted-dirs.txt" ]; then
               echo 'Extracted folders:'
               echo
               echo '```'
