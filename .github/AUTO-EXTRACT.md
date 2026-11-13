@@ -41,12 +41,13 @@
 
 ---
 
-## 🛡️ সুরক্ষা
+## 🛡️ সুরক্ষা ও APK বিল্ড
 
 - `../` বা absolute path থাকা archive বাদ দেওয়া হয় (**zip-slip guard**) — এমন archive extract হয় না
 - repo-র নিজস্ব ফাইলগুলো (zip-এর আগে থাকা) কখনো মুছে ফেলা হয় না
-- অটোমেটেশনের নিজস্ব ফাইল (`auto-extract-zip.yml`, `extract-zips.sh`, manifest) সুরক্ষিত — নিজেই নিজেকে মুছতে পারে না
-- auto-commit-এর মেসেজে `[skip actions]` থাকে, তাই কোনো rebuild লুপ হয় না
+- সব workflow ও অটোমেটেশনের ফাইল (`.github/workflows/*`, `.github/scripts/*`, manifest, baseline) সুরক্ষিত — নতুন জিপে না থাকলেও এগুলো ডিলিট হয় না এবং পুরোনো কপি দিয়ে ওভাররাইটও হয় না
+- `main` ব্রাঞ্চে `.zip` extract শেষ হওয়ার সাথে সাথেই **`Build AVA APK`** স্বয়ংক্রিয়ভাবে চলে নতুন কোডের APK তৈরি করে দেয়
+- auto-commit-এর মেসেজে `[skip actions]` থাকে, তাই কোনো অসীম লুপ হয় না
 
 ---
 

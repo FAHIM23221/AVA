@@ -1,0 +1,71 @@
+name: Build AVA APK
+
+# Runs automatically:
+#   - after "Auto Extract ZIP" unpacks an uploaded .zip into main/master,
+#   - on direct non-ZIP code pushes and pull requests to main/master,
+#   - or manually via "Run workflow" in the Actions tab.
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '*.zip'
+      - '**/*.zip'
+  pull_request:
+    branches: [ main, master ]
+  workflow_run:
+    workflows: [ "Auto Extract ZIP" ]
+    types: [ completed ]
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || '' }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Accept Android SDK licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Build Debug APK
+        run: |
+          set -o pipefail
+          gradle assembleDebug --stacktrace 2>&1 | tee build-log.txt
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build-log.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AVA-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Build summary
+        if: success()
+        run: echo "✅ APK built successfully! Download it from the Artifacts section below." >> $GITHUB_STEP_SUMMARY
