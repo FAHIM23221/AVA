@@ -1,5 +1,4 @@
 # scope	path
-.	.github/workflows/build.yml
 .	.gitignore
 .	MOBILE_SETUP_GUIDE_BANGLA.md
 .	SETUP_GUIDE.md
@@ -16,6 +15,7 @@
 .	app/src/main/java/com/fahimkhan/ava/core/extensions/AvaExtensions.kt
 .	app/src/main/java/com/fahimkhan/ava/core/utils/ApiKeyStore.kt
 .	app/src/main/java/com/fahimkhan/ava/core/utils/AppLauncherController.kt
+.	app/src/main/java/com/fahimkhan/ava/core/utils/CameraRequestState.kt
 .	app/src/main/java/com/fahimkhan/ava/core/utils/DeviceControlSystem.kt
 .	app/src/main/java/com/fahimkhan/ava/security/owner/OwnerSecuritySystem.kt
 .	app/src/main/java/com/fahimkhan/ava/services/AvaForegroundService.kt

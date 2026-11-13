@@ -63,6 +63,12 @@ fun MainScreen(
     var tapCount by remember { mutableStateOf(0) }
     var lastTap  by remember { mutableStateOf(0L) }
 
+    // Voice commands that need AVA's own camera ("ছবি তোলো") ask for the
+    // camera screen through this event — navigation lives here.
+    LaunchedEffect(Unit) {
+        viewModel.navigateToVision.collect { onNavigateVision() }
+    }
+
     val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     var showMicDeniedHint by remember { mutableStateOf(false) }
     var awaitingMicGrant  by remember { mutableStateOf(false) }

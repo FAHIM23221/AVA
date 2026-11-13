@@ -1,6 +1,11 @@
 package com.fahimkhan.ava.ui.screens
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -27,6 +32,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fahimkhan.ava.ai.memory.MemoryRepository
+import com.fahimkhan.ava.core.utils.CameraRequestState
 import com.fahimkhan.ava.ui.components.CyberCard
 import com.fahimkhan.ava.ui.components.NeonButton
 import com.fahimkhan.ava.ui.components.NeonText
@@ -38,14 +44,30 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import javax.inject.Inject
 
 @HiltViewModel
 class VisionViewModel @Inject constructor(
-    private val memory: MemoryRepository
+    private val memory: MemoryRepository,
+    private val cameraState: CameraRequestState
 ) : ViewModel() {
     private val _scanResult = MutableStateFlow("")
     val scanResult = _scanResult.asStateFlow()
+
+    val useFrontCamera = cameraState.useFrontCamera
+    val pendingCapture = cameraState.pendingCapture
+
+    fun toggleCamera() { cameraState.useFrontCamera.value = !cameraState.useFrontCamera.value }
+    fun requestCapture() { cameraState.pendingCapture.value = true }
+    fun cancelPendingCapture() { cameraState.pendingCapture.value = false }
+    fun onCaptureFinished(message: String) {
+        _scanResult.value = message
+        cameraState.pendingCapture.value = false
+    }
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning = _isScanning.asStateFlow()
@@ -94,6 +116,30 @@ fun VisionScreen(
     var showRegisterDialog by remember { mutableStateOf(false) }
     var registerAsOwner  by remember { mutableStateOf(false) }
 
+    val context          = LocalContext.current
+    val useFront         by viewModel.useFrontCamera.collectAsState()
+    val pendingCapture   by viewModel.pendingCapture.collectAsState()
+    val imageCapture     = remember {
+        ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
+    }
+    var cameraReady      by remember { mutableStateOf(false) }
+
+    // Don't let a request that never fired (e.g. camera permission denied)
+    // surprise the person with a photo the next time this screen opens.
+    DisposableEffect(Unit) {
+        onDispose { viewModel.cancelPendingCapture() }
+    }
+
+    // A voice command ("ছবি তোলো") or the TAKE PHOTO button sets
+    // pendingCapture; once the camera is bound we wait a beat for
+    // auto-exposure, then take the shot with AVA's own camera.
+    LaunchedEffect(cameraReady, pendingCapture) {
+        if (cameraReady && pendingCapture) {
+            kotlinx.coroutines.delay(1200)
+            takePhoto(context, imageCapture) { message -> viewModel.onCaptureFinished(message) }
+        }
+    }
+
     // Scan line animation
     val infiniteTransition = rememberInfiniteTransition(label = "scan")
     val scanY by infiniteTransition.animateFloat(
@@ -131,7 +177,7 @@ fun VisionScreen(
                         .fillMaxWidth()
                         .height(320.dp)
                 ) {
-                    CameraPreview()
+                    CameraPreview(useFront = useFront, imageCapture = imageCapture, onBound = { cameraReady = it })
 
                     // Scan overlay
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -163,6 +209,21 @@ fun VisionScreen(
                                 Text(scanResult, color = AvaColors.Active, fontSize = 13.sp)
                             }
                         }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        NeonButton(
+                            text     = "TAKE PHOTO",
+                            color    = AvaColors.Active,
+                            onClick  = { viewModel.requestCapture() },
+                            modifier = Modifier.weight(1f)
+                        )
+                        NeonButton(
+                            text     = if (useFront) "USE BACK CAM" else "USE FRONT CAM",
+                            color    = AvaColors.CyberPurple,
+                            onClick  = { viewModel.toggleCamera() },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -238,28 +299,83 @@ fun VisionScreen(
     }
 }
 
+/**
+ * Camera preview that also binds an ImageCapture use case so AVA can take
+ * photos itself, and rebinds when the front/back lens changes. The parent
+ * recomposes constantly (scan-line animation) and AndroidView's `update`
+ * runs on every recomposition, so the bound lens is remembered and the
+ * (flickery) rebind only happens when [useFront] actually changes.
+ */
 @Composable
-fun CameraPreview() {
-    val context       = LocalContext.current
+fun CameraPreview(
+    useFront     : Boolean,
+    imageCapture : ImageCapture,
+    onBound      : (Boolean) -> Unit
+) {
+    val context        = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val boundLens      = remember { arrayOfNulls<Boolean>(1) }
 
     AndroidView(
-        factory = { ctx ->
-            val previewView = PreviewView(ctx)
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-            cameraProviderFuture.addListener({
-                val cameraProvider = cameraProviderFuture.get()
-                val preview = Preview.Builder().build().also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
-                }
-                try {
-                    cameraProvider.unbindAll()
-                    cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_FRONT_CAMERA, preview)
-                } catch (e: Exception) { /* Handle */ }
-            }, ContextCompat.getMainExecutor(ctx))
-            previewView
+        factory  = { ctx -> PreviewView(ctx) },
+        update   = { previewView ->
+            if (boundLens[0] != useFront) {
+                boundLens[0] = useFront
+                onBound(false)
+                val providerFuture = ProcessCameraProvider.getInstance(context)
+                providerFuture.addListener({
+                    try {
+                        val provider = providerFuture.get()
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
+                        val selector = if (useFront) CameraSelector.DEFAULT_FRONT_CAMERA
+                                       else CameraSelector.DEFAULT_BACK_CAMERA
+                        provider.unbindAll()
+                        provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+                        onBound(true)
+                    } catch (e: Exception) {
+                        onBound(false)
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            }
         },
         modifier = Modifier.fillMaxSize()
+    )
+}
+
+/**
+ * Takes a photo with AVA's own camera session. Android 10+: saved into the
+ * shared Pictures/AVA folder (shows in the Gallery, no storage permission
+ * needed for your own new files); older: the app's own picture folder.
+ */
+private fun takePhoto(context: Context, imageCapture: ImageCapture, onResult: (String) -> Unit) {
+    val name = "AVA_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.jpg"
+    val outputOptions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/AVA")
+        }
+        ImageCapture.OutputFileOptions.Builder(
+            context.contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
+        ).build()
+    } else {
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: context.filesDir
+        ImageCapture.OutputFileOptions.Builder(File(dir, name)).build()
+    }
+
+    imageCapture.takePicture(
+        outputOptions,
+        ContextCompat.getMainExecutor(context),
+        object : ImageCapture.OnImageSavedCallback {
+            override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                onResult("✓ Photo saved: $name")
+            }
+            override fun onError(exc: ImageCaptureException) {
+                onResult("✗ Couldn't take the photo: ${exc.message}")
+            }
+        }
     )
 }
 

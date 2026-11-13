@@ -29,6 +29,8 @@ class ApiKeyStore @Inject constructor(
         val ELEVENLABS_VOICE  = stringPreferencesKey("elevenlabs_voice_id")
         val USE_ELEVENLABS    = booleanPreferencesKey("use_elevenlabs")
         val RECOGNITION_LANG  = stringPreferencesKey("recognition_language")
+        val GEMINI_VOICE      = stringPreferencesKey("gemini_voice_name")
+        val USE_GEMINI_VOICE  = booleanPreferencesKey("use_gemini_voice")
     }
 
     private fun isPlaceholder(value: String) =
@@ -85,6 +87,24 @@ class ApiKeyStore @Inject constructor(
 
     suspend fun saveRecognitionLanguage(languageTag: String) {
         context.apiKeyDataStore.edit { it[Keys.RECOGNITION_LANG] = languageTag.trim() }
+    }
+
+    /**
+     * AVA's speaking voice. Gemini's own text-to-speech (same Gemini API
+     * key, no extra service) offers named voices — "Aoede" is a breezy
+     * female voice and is the default. Off = the phone's built-in voice.
+     */
+    suspend fun getGeminiVoiceName(): String =
+        context.apiKeyDataStore.data.first()[Keys.GEMINI_VOICE] ?: "Aoede"
+
+    suspend fun getUseGeminiVoice(): Boolean =
+        context.apiKeyDataStore.data.first()[Keys.USE_GEMINI_VOICE] ?: true
+
+    suspend fun saveGeminiVoice(voiceName: String, enabled: Boolean) {
+        context.apiKeyDataStore.edit {
+            if (voiceName.isNotBlank()) it[Keys.GEMINI_VOICE] = voiceName
+            it[Keys.USE_GEMINI_VOICE] = enabled
+        }
     }
 
     /** Masked preview for display in Admin panel, e.g. "AIza••••••••7f2a" */

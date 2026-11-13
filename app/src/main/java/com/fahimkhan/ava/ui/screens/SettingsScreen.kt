@@ -40,6 +40,20 @@ val spokenLanguageOptions = listOf(
     SpokenLanguageOption("العربية (Arabic)",        "ar-SA"),
 )
 
+// Gemini's built-in text-to-speech voices (all female-sounding; descriptors
+// are Google's own). An empty id = the phone's built-in voice (offline, but
+// a single fixed voice on most phones).
+data class VoiceOption(val label: String, val id: String)
+
+val voiceOptions = listOf(
+    VoiceOption("Aoede — breezy (default)", "Aoede"),
+    VoiceOption("Kore — firm",              "Kore"),
+    VoiceOption("Leda — youthful",          "Leda"),
+    VoiceOption("Zephyr — bright",          "Zephyr"),
+    VoiceOption("Sulafat — warm",           "Sulafat"),
+    VoiceOption("Phone's built-in voice (offline)", ""),
+)
+
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val apiKeyStore: ApiKeyStore
@@ -47,8 +61,23 @@ class SettingsViewModel @Inject constructor(
     private val _recognitionLanguage = MutableStateFlow("bn-BD")
     val recognitionLanguage = _recognitionLanguage.asStateFlow()
 
+    // The selected voice's id, or "" when the phone's own voice is chosen.
+    private val _voiceChoice = MutableStateFlow("Aoede")
+    val voiceChoice = _voiceChoice.asStateFlow()
+
     init {
-        viewModelScope.launch { _recognitionLanguage.value = apiKeyStore.getRecognitionLanguage() }
+        viewModelScope.launch {
+            _recognitionLanguage.value = apiKeyStore.getRecognitionLanguage()
+            _voiceChoice.value = if (apiKeyStore.getUseGeminiVoice()) apiKeyStore.getGeminiVoiceName() else ""
+        }
+    }
+
+    fun setVoice(id: String) {
+        _voiceChoice.value = id
+        viewModelScope.launch {
+            if (id.isBlank()) apiKeyStore.saveGeminiVoice("", enabled = false)
+            else apiKeyStore.saveGeminiVoice(id, enabled = true)
+        }
     }
 
     fun setRecognitionLanguage(tag: String) {
@@ -64,6 +93,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val recognitionLanguage by viewModel.recognitionLanguage.collectAsState()
+    val voiceChoice by viewModel.voiceChoice.collectAsState()
     var alwaysListening  by remember { mutableStateOf(false) }
     var emotionalMode    by remember { mutableStateOf(true) }
     var elevenLabsVoice  by remember { mutableStateOf(false) }
@@ -130,6 +160,34 @@ fun SettingsScreen(
                     SettingsToggle("ElevenLabs Premium Voice", "Natural AI voice (API key required)", elevenLabsVoice) { elevenLabsVoice = it }
 
                     Spacer(Modifier.height(10.dp))
+                    Text("AVA'S VOICE", color = AvaColors.TextSecondary, fontSize = 11.sp, letterSpacing = 1.sp)
+                    Text(
+                        "Uses Gemini's own voices with your existing Gemini key. If it can't reach Gemini, AVA falls back to the phone's built-in voice.",
+                        color = AvaColors.TextMuted, fontSize = 9.sp
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        voiceOptions.forEach { option ->
+                            val active = option.id == voiceChoice
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(
+                                        if (active) AvaColors.CyberPurple.copy(0.15f) else AvaColors.DarkSurface,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .border(1.dp, if (active) AvaColors.CyberPurple else AvaColors.ElevatedSurface, RoundedCornerShape(8.dp))
+                                    .clickable { viewModel.setVoice(option.id) }
+                                    .padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(option.label, color = if (active) AvaColors.CyberPurple else AvaColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                                if (active) Icon(Icons.Rounded.CheckCircle, null, tint = AvaColors.CyberPurple, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(14.dp))
                     Text("SPOKEN LANGUAGE", color = AvaColors.TextSecondary, fontSize = 11.sp, letterSpacing = 1.sp)
                     Text(
                         "AVA listens for one language at a time — pick the one you'll actually speak. There's no automatic \"detect any language\" without a paid cloud speech service.",

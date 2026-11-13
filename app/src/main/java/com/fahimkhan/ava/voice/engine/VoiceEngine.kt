@@ -2,6 +2,10 @@ package com.fahimkhan.ava.voice.engine
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.util.Base64
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -16,6 +20,7 @@ import kotlinx.coroutines.flow.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.*
 import javax.inject.Inject
@@ -45,7 +50,12 @@ class VoiceEngine @Inject constructor(
     private var androidTts: TextToSpeech? = null
     private var ttsReady = false
     private var speechRecognizer: SpeechRecognizer? = null
-    private val httpClient = OkHttpClient()
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+    private var geminiTrack: AudioTrack? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init { initAndroidTts(); initSpeechRecognizer() }
@@ -118,9 +128,115 @@ class VoiceEngine @Inject constructor(
         _audioLevelFlow.value = 0f
     }
 
+    /**
+     * Voice priority: ElevenLabs (if configured) → Gemini's own TTS with a
+     * female voice like "Aoede" (same Gemini key; handles Bengali and most
+     * other languages properly) → the phone's built-in voice as the last
+     * resort if the network call fails or quota runs out. The Gemini /
+     * ElevenLabs paths return once playback has finished.
+     */
     suspend fun speak(text: String) {
         val useElevenLabs = apiKeyStore.getUseElevenLabs() && apiKeyStore.hasElevenLabsKey()
-        if (useElevenLabs) speakWithElevenLabs(text) else speakWithAndroidTts(text)
+        when {
+            useElevenLabs -> speakWithElevenLabs(text)
+            apiKeyStore.getUseGeminiVoice() && speakWithGeminiTts(text) -> Unit
+            else -> speakWithAndroidTts(text)
+        }
+    }
+
+    // Tried in order; the first that answers with audio wins. The first is
+    // the one verified working on this project's key.
+    private val geminiTtsModels = listOf("gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts")
+
+    // Gemini replies sometimes contain markdown (**bold**, #, `code`) that a
+    // voice would read out literally.
+    private fun cleanForSpeech(text: String): String =
+        text.replace(Regex("[*#`_~]+"), "").replace(Regex("\\s+"), " ").trim()
+
+    /** Returns true if Gemini TTS produced audio and it finished playing. */
+    private suspend fun speakWithGeminiTts(text: String): Boolean = withContext(Dispatchers.IO) {
+        val apiKey = apiKeyStore.getGeminiKey()
+        if (apiKey.isBlank()) return@withContext false
+        val voiceName = apiKeyStore.getGeminiVoiceName()
+        val spoken = cleanForSpeech(text)
+        if (spoken.isBlank()) return@withContext false
+
+        for (model in geminiTtsModels) {
+            try {
+                val body = JSONObject().apply {
+                    put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(
+                        // The part before the colon is a style instruction, not spoken.
+                        JSONObject().put("text", "Say in a warm, natural, friendly tone: $spoken")
+                    ))))
+                    put("generationConfig", JSONObject().apply {
+                        put("responseModalities", JSONArray().put("AUDIO"))
+                        put("speechConfig", JSONObject().put("voiceConfig",
+                            JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", voiceName))))
+                    })
+                }
+                val request = Request.Builder()
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+                    .addHeader("x-goog-api-key", apiKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                val responseBody = response.body?.string().orEmpty()
+                if (!response.isSuccessful) continue
+
+                val inline = JSONObject(responseBody).optJSONArray("candidates")
+                    ?.optJSONObject(0)?.optJSONObject("content")
+                    ?.optJSONArray("parts")?.optJSONObject(0)
+                    ?.optJSONObject("inlineData") ?: continue
+                val pcm = Base64.decode(inline.optString("data"), Base64.DEFAULT)
+                if (pcm.isEmpty()) continue
+                val sampleRate = Regex("rate=(\\d+)").find(inline.optString("mimeType"))
+                    ?.groupValues?.get(1)?.toIntOrNull() ?: 24000
+
+                playPcm(pcm, sampleRate)
+                return@withContext true
+            } catch (e: Exception) {
+                // network/parse problem — try the next model, then fall back
+            }
+        }
+        false
+    }
+
+    private suspend fun playPcm(pcm: ByteArray, sampleRate: Int) {
+        stopGeminiPlayback()
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .build()
+            )
+            .setBufferSizeInBytes(pcm.size)
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .build()
+        geminiTrack = track
+        track.write(pcm, 0, pcm.size)
+        track.play()
+        _audioLevelFlow.value = 0.7f
+        delay(pcm.size * 1000L / (sampleRate * 2) + 200)
+        _audioLevelFlow.value = 0f
+        if (geminiTrack === track) stopGeminiPlayback()
+    }
+
+    private fun stopGeminiPlayback() {
+        geminiTrack?.let { t ->
+            try { t.stop() } catch (e: Exception) { /* already stopped */ }
+            try { t.release() } catch (e: Exception) { /* already released */ }
+        }
+        geminiTrack = null
     }
 
     private fun speakWithAndroidTts(text: String) {
@@ -232,6 +348,6 @@ class VoiceEngine @Inject constructor(
         scope.launch { _audioLevelFlow.value = 0.7f; delay(mp.duration.toLong()); _audioLevelFlow.value = 0f; mp.release() }
     }
 
-    fun stopSpeaking() { androidTts?.stop(); _audioLevelFlow.value = 0f }
+    fun stopSpeaking() { androidTts?.stop(); stopGeminiPlayback(); _audioLevelFlow.value = 0f }
     fun destroy() { speechRecognizer?.destroy(); androidTts?.shutdown(); scope.cancel() }
 }

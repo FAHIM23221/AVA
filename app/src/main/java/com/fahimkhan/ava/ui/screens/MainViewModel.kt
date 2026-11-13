@@ -6,8 +6,10 @@ import com.fahimkhan.ava.ai.brain.AiBrainRepository
 import com.fahimkhan.ava.ai.memory.MemoryRepository
 import com.fahimkhan.ava.core.extensions.isBengali
 import com.fahimkhan.ava.core.utils.AppLauncherController
+import com.fahimkhan.ava.core.utils.CameraRequestState
 import com.fahimkhan.ava.core.utils.DeviceControlSystem
 import com.fahimkhan.ava.core.utils.LaunchResult
+import com.fahimkhan.ava.services.AvaAccessibilityService
 import com.fahimkhan.ava.ui.components.OrbState
 import com.fahimkhan.ava.voice.engine.VoiceEngine
 import com.fahimkhan.ava.voice.wake.WakeWordDetector
@@ -25,7 +27,8 @@ class MainViewModel @Inject constructor(
     private val voiceEngine: VoiceEngine,
     private val wakeWord: WakeWordDetector,
     private val appLauncher: AppLauncherController,
-    private val deviceControl: DeviceControlSystem
+    private val deviceControl: DeviceControlSystem,
+    private val cameraState: CameraRequestState
 ) : ViewModel() {
     private val _uiState       = MutableStateFlow(MainUiState())
     val uiState                = _uiState.asStateFlow()
@@ -45,6 +48,10 @@ class MainViewModel @Inject constructor(
     // overlapping network requests (some devices' speech recognizers emit
     // a final result more than once for the same utterance).
     @Volatile private var isProcessing = false
+
+    // Tells MainScreen to open the camera screen (it owns navigation).
+    private val _navigateToVision = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val navigateToVision = _navigateToVision.asSharedFlow()
 
     init {
         viewModelScope.launch { kotlinx.coroutines.delay(2000); _isLoading.value = false; greetUser() }
@@ -94,7 +101,7 @@ class MainViewModel @Inject constructor(
         val greeting = aiBrain.getGreeting()
         _subtitleText.value = greeting
         voiceEngine.speak(greeting)
-        kotlinx.coroutines.delay(3000)
+        kotlinx.coroutines.delay(1200)
         _orbState.value = OrbState.IDLE; _subtitleText.value = ""
     }
 
@@ -125,7 +132,9 @@ class MainViewModel @Inject constructor(
                 _subtitleText.value = response
                 voiceEngine.speak(response)
 
-                kotlinx.coroutines.delay(4000)
+                // speak() now waits until the voice has finished, so this is
+                // just a short breather before the orb goes idle.
+                kotlinx.coroutines.delay(1200)
                 _orbState.value = OrbState.IDLE
                 _subtitleText.value = ""
             } finally {
@@ -140,6 +149,23 @@ class MainViewModel @Inject constructor(
      * be sent to Gemini instead.
      */
     private suspend fun handleDeviceCommand(input: String): String? {
+        // Taking a photo uses AVA's OWN camera (not the phone's Camera app):
+        // Android doesn't let one app press another app's shutter, but AVA
+        // can drive its own camera session. Checked first so "ক্যামেরা ওপেন
+        // করে ছবি তোলো" isn't swallowed by the plain app-launch rule.
+        if (isPhotoCommand(input)) {
+            val lower = input.lowercase()
+            when {
+                listOf("selfie", "সেলফি", "front", "সামনের").any { lower.contains(it) } ->
+                    cameraState.useFrontCamera.value = true
+                listOf("back", "rear", "পিছনের", "পেছনের").any { lower.contains(it) } ->
+                    cameraState.useFrontCamera.value = false
+            }
+            cameraState.pendingCapture.value = true
+            _navigateToVision.tryEmit(Unit)
+            return if (input.isBengali()) "ছবি তুলছি, Boss।" else "Taking a photo, Boss."
+        }
+
         // Checked before the generic app-launch match below: "ইউটিউব ওপেন
         // করে ... ভিডিও চালাও" / "open youtube and play a video" mentions
         // both YouTube and a play/video action, so it's worth a direct
@@ -148,9 +174,22 @@ class MainViewModel @Inject constructor(
         if (youtubeQuery != null) {
             val bengali = input.isBengali()
             return when (val result = appLauncher.launchYouTubeSearch(youtubeQuery)) {
-                is LaunchResult.Success ->
-                    if (bengali) "YouTube-এ '$youtubeQuery' সার্চ করে দেখাচ্ছি, Boss। প্রথম ভিডিওটা ট্যাপ করলেই চলবে।"
-                    else "Showing '$youtubeQuery' results on YouTube, Boss. Tap the first one to play it."
+                is LaunchResult.Success -> {
+                    // With the Accessibility Service on, wait for the results
+                    // to load and tap the first video for real; otherwise land
+                    // on the results page and say so honestly.
+                    if (AvaAccessibilityService.isConnected()) {
+                        viewModelScope.launch {
+                            kotlinx.coroutines.delay(4500)
+                            AvaAccessibilityService.tapFirstClickableBelow(yFraction = 0.25f)
+                        }
+                        if (bengali) "YouTube-এ '$youtubeQuery' সার্চ করে প্রথম ভিডিওটা চালাচ্ছি, Boss।"
+                        else "Searching '$youtubeQuery' on YouTube and playing the first video, Boss."
+                    } else {
+                        if (bengali) "YouTube-এ '$youtubeQuery' সার্চ করে দেখাচ্ছি, Boss। নিজে থেকে ভিডিও চালাতে হলে Settings → Accessibility-তে AVA চালু করতে হবে।"
+                        else "Showing '$youtubeQuery' results on YouTube, Boss. To auto-play, turn on AVA in Settings → Accessibility."
+                    }
+                }
                 is LaunchResult.NotFound ->
                     if (bengali) "YouTube খুলতে পারলাম না, Boss।" else "I couldn't open YouTube, Boss."
             }
@@ -178,6 +217,15 @@ class MainViewModel @Inject constructor(
         if (deviceResponse.isNotBlank()) return deviceResponse
 
         return null
+    }
+
+    private val photoNouns = listOf("ছবি", "ফটো", "photo", "picture", "selfie", "সেলফি", "pic")
+    private val photoVerbs = listOf("তোল", "তুল", "ক্লিক", "click", "take", "snap", "capture")
+
+    /** True for requests like "ছবি তোলো", "take a selfie", "ক্যামেরা ওপেন করে ছবি তোলো". */
+    private fun isPhotoCommand(text: String): Boolean {
+        val lower = text.lowercase()
+        return photoNouns.any { lower.contains(it) } && photoVerbs.any { lower.contains(it) }
     }
 
     // Filler words that carry no real search meaning on their own —
