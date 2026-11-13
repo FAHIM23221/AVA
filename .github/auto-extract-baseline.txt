@@ -1,4 +1,6 @@
+.github/AUTO-EXTRACT.md
 .github/scripts/extract-zips.sh
 .github/workflows/auto-extract-zip.yml
+.github/workflows/build.yml
 resp.json
 response.json

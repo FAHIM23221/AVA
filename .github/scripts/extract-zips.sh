@@ -103,11 +103,13 @@ baseline_contains() {
   grep -Fxq -- "$1" "$BASELINE_FILE"
 }
 
-# The automation must never delete itself, whatever the archive contains.
+# Repository CI & automation files that an uploaded archive must never
+# overwrite or delete (even if the archive omits them or carries an older copy).
 is_protected() {
   case "$1" in
-    .github/workflows/auto-extract-zip.yml) return 0 ;;
-    .github/scripts/extract-zips.sh) return 0 ;;
+    .github/workflows/*) return 0 ;;
+    .github/scripts/*) return 0 ;;
+    .github/AUTO-EXTRACT.md) return 0 ;;
     .github/auto-extract-manifest.tsv) return 0 ;;
     .github/auto-extract-baseline.txt) return 0 ;;
   esac
@@ -196,6 +198,20 @@ extract_archive() {
   src="$tmp"
   [ -n "$prefix" ] && src="$tmp/$prefix"
 
+  # --- never let an archive overwrite existing protected CI/automation files
+  if [ -d "$src" ]; then
+    while IFS= read -r -d '' unpacked_file; do
+      local rel_in_src="${unpacked_file#"$src"/}"
+      local repo_rel="$rel_in_src"
+      [ "$scope_rel" != "." ] && repo_rel="$scope_rel/$rel_in_src"
+      if is_protected "$repo_rel" && [ -e "$REPO_DIR/$repo_rel" ]; then
+        warn "Keeping existing $repo_rel (ignoring archive copy)."
+        rm -f "$unpacked_file"
+      fi
+    done < <(find "$src" -type f -print0 2>/dev/null || true)
+    find "$src" -depth -type d -empty -delete 2>/dev/null || true
+  fi
+
   # --- copy into the destination, overwriting existing files ---------------
   mkdir -p "$destination"
   if [ -d "$src" ]; then
@@ -215,11 +231,10 @@ extract_archive() {
     fi
     [ -z "$entry" ] && continue
     [ -e "$destination/$entry" ] || continue
-    if [ "$scope_rel" = "." ]; then
-      printf '%s\n' "$entry" >> "$new_paths"
-    else
-      printf '%s/%s\n' "$scope_rel" "$entry" >> "$new_paths"
-    fi
+    local repo_entry="$entry"
+    [ "$scope_rel" != "." ] && repo_entry="$scope_rel/$entry"
+    is_protected "$repo_entry" && continue
+    printf '%s\n' "$repo_entry" >> "$new_paths"
   done < <(unzip -Z1 "$archive" 2>/dev/null || true)
 
   rm -rf "$tmp"
