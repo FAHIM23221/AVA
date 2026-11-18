@@ -233,7 +233,10 @@ class MainViewModel @Inject constructor(
     // ভিডিও চালাও" doesn't end up searching for the literal word "random".
     private val youtubeFillerWords = setOf(
         "একটা", "একটি", "কোনো", "রেন্ডম", "random", "a", "an", "the", "video", "ভিডিও",
-        "চালাও", "চালান", "প্লে", "play", "ওপেন", "open", "করে", "কর", "করো", "then", "and", "তারপর", "এবং"
+        "চালাও", "চালান", "প্লে", "play", "ওপেন", "open", "করে", "কর", "করো", "then", "and", "তারপর", "এবং",
+        // "যে কোন একটা ভিডিও" / "any video" — says nothing about WHAT to search for.
+        // ("নির্দিষ্ট" is the speech recognizer mishearing "যে কোন"/"any".)
+        "যে", "কোন", "যেকোনো", "যেকোন", "যে-কোনো", "নির্দিষ্ট", "any", "some", "something", "anything"
     )
 
     /**

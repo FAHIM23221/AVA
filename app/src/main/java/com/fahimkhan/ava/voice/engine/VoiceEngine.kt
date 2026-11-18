@@ -140,33 +140,93 @@ class VoiceEngine @Inject constructor(
         when {
             useElevenLabs -> speakWithElevenLabs(text)
             apiKeyStore.getUseGeminiVoice() && speakWithGeminiTts(text) -> Unit
-            else -> speakWithAndroidTts(text)
+            else -> {
+                if (!apiKeyStore.getUseGeminiVoice()) _lastVoiceStatus.value = "PHONE VOICE (chosen in Settings)"
+                speakWithAndroidTts(text)
+            }
         }
     }
 
-    // Tried in order; the first that answers with audio wins. The first is
-    // the one verified working on this project's key.
-    private val geminiTtsModels = listOf("gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts")
+    // Each Gemini TTS model has its OWN free-tier quota (a couple of requests
+    // per minute / per day on the free plan), so rotating through several
+    // means a busy conversation doesn't drop to the phone's voice as soon as
+    // one model runs dry. The first is the one verified working on this key.
+    private val geminiTtsModels = listOf(
+        "gemini-3.8-flash-lite-tts",
+        "gemini-3.1-flash-tts-preview",
+        "gemini-3.8-flash-tts",
+        "gemini-2.5-flash-preview-tts"
+    )
+    // After a 429 a model is skipped for a while instead of being retried
+    // (and waiting for the failure) on every single sentence.
+    private val modelCooldownUntil = mutableMapOf<String, Long>()
+
+    // What the voice did last time, shown in Admin → System Status so a
+    // "why did I hear the male voice?" question has an actual answer.
+    private val _lastVoiceStatus = MutableStateFlow("READY")
+    val lastVoiceStatus = _lastVoiceStatus.asStateFlow()
 
     // Gemini replies sometimes contain markdown (**bold**, #, `code`) that a
     // voice would read out literally.
     private fun cleanForSpeech(text: String): String =
         text.replace(Regex("[*#`_~]+"), "").replace(Regex("\\s+"), " ").trim()
 
+    // Repeated phrases ("YouTube খুলছি, Boss", greetings...) are saved on disk
+    // so they don't spend free-tier quota every time they're spoken.
+    private fun ttsCacheDir(): java.io.File = java.io.File(context.cacheDir, "tts").apply { mkdirs() }
+
+    private fun cacheKey(voice: String, spoken: String): String =
+        java.security.MessageDigest.getInstance("SHA-1")
+            .digest("$voice|$spoken".toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
+
+    private fun readCachedAudio(voice: String, spoken: String): Pair<ByteArray, Int>? {
+        val key = cacheKey(voice, spoken)
+        val file = ttsCacheDir().listFiles()?.firstOrNull { it.name.startsWith("$key.") } ?: return null
+        val rate = file.name.removePrefix("$key.").removeSuffix(".pcm").toIntOrNull() ?: return null
+        return try { file.readBytes() to rate } catch (e: Exception) { null }
+    }
+
+    private fun writeCachedAudio(voice: String, spoken: String, pcm: ByteArray, rate: Int) {
+        try {
+            val dir = ttsCacheDir()
+            java.io.File(dir, "${cacheKey(voice, spoken)}.$rate.pcm").writeBytes(pcm)
+            val files = dir.listFiles()?.sortedBy { it.lastModified() } ?: return
+            if (files.size > 80) files.take(files.size - 80).forEach { it.delete() }
+        } catch (e: Exception) { /* cache is a nice-to-have */ }
+    }
+
     /** Returns true if Gemini TTS produced audio and it finished playing. */
     private suspend fun speakWithGeminiTts(text: String): Boolean = withContext(Dispatchers.IO) {
         val apiKey = apiKeyStore.getGeminiKey()
-        if (apiKey.isBlank()) return@withContext false
+        if (apiKey.isBlank()) {
+            _lastVoiceStatus.value = "PHONE VOICE ← no Gemini key"
+            return@withContext false
+        }
         val voiceName = apiKeyStore.getGeminiVoiceName()
         val spoken = cleanForSpeech(text)
         if (spoken.isBlank()) return@withContext false
 
+        readCachedAudio(voiceName, spoken)?.let { (pcm, rate) ->
+            _lastVoiceStatus.value = "GEMINI ✓ (saved audio)"
+            playPcm(pcm, rate)
+            return@withContext true
+        }
+
+        val failures = mutableListOf<String>()
         for (model in geminiTtsModels) {
+            val short = model.removePrefix("gemini-")
+            if ((modelCooldownUntil[model] ?: 0L) > System.currentTimeMillis()) {
+                failures += "$short:resting"
+                continue
+            }
             try {
+                // Just the text — NO "say it warmly:" style prefix. With Bengali
+                // text the model read that English instruction out loud first
+                // (AVA saying something in English before every answer).
                 val body = JSONObject().apply {
                     put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(
-                        // The part before the colon is a style instruction, not spoken.
-                        JSONObject().put("text", "Say in a warm, natural, friendly tone: $spoken")
+                        JSONObject().put("text", spoken)
                     ))))
                     put("generationConfig", JSONObject().apply {
                         put("responseModalities", JSONArray().put("AUDIO"))
@@ -183,28 +243,65 @@ class VoiceEngine @Inject constructor(
 
                 val response = httpClient.newCall(request).execute()
                 val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) continue
+                if (!response.isSuccessful) {
+                    failures += "$short:${response.code}"
+                    if (response.code == 429) {
+                        val perDay = responseBody.contains("PerDay", ignoreCase = true)
+                        modelCooldownUntil[model] =
+                            System.currentTimeMillis() + if (perDay) 30 * 60_000L else 60_000L
+                    }
+                    continue
+                }
 
                 val inline = JSONObject(responseBody).optJSONArray("candidates")
                     ?.optJSONObject(0)?.optJSONObject("content")
                     ?.optJSONArray("parts")?.optJSONObject(0)
-                    ?.optJSONObject("inlineData") ?: continue
+                    ?.optJSONObject("inlineData")
+                if (inline == null) { failures += "$short:no-audio"; continue }
                 val pcm = Base64.decode(inline.optString("data"), Base64.DEFAULT)
-                if (pcm.isEmpty()) continue
+                if (pcm.isEmpty()) { failures += "$short:empty"; continue }
                 val sampleRate = Regex("rate=(\\d+)").find(inline.optString("mimeType"))
                     ?.groupValues?.get(1)?.toIntOrNull() ?: 24000
 
+                writeCachedAudio(voiceName, spoken, pcm, sampleRate)
+                _lastVoiceStatus.value = "GEMINI ✓ $short"
                 playPcm(pcm, sampleRate)
                 return@withContext true
             } catch (e: Exception) {
-                // network/parse problem — try the next model, then fall back
+                failures += "$short:${e.javaClass.simpleName}"
             }
         }
+        _lastVoiceStatus.value = "PHONE VOICE ← " + failures.joinToString(" ")
         false
     }
 
-    private suspend fun playPcm(pcm: ByteArray, sampleRate: Int) {
+    // Soft 10 ms fade at both ends (a hard start/stop on speech audio is an
+    // audible click/hiss) plus 200 ms of silence so the last word isn't cut off.
+    private fun smoothEdges(pcm: ByteArray, sampleRate: Int): ByteArray {
+        val sampleCount = pcm.size / 2
+        if (sampleCount < 4) return pcm
+        val out = ByteArray((sampleCount + sampleRate / 5) * 2)
+        System.arraycopy(pcm, 0, out, 0, sampleCount * 2)
+        val fade = minOf(sampleRate / 100, sampleCount / 2)
+        fun scale(index: Int, gain: Float) {
+            val lo = out[index * 2].toInt() and 0xFF
+            val hi = out[index * 2 + 1].toInt()
+            val value = ((hi shl 8) or lo).toShort().toInt()
+            val scaled = (value * gain).toInt().coerceIn(-32768, 32767)
+            out[index * 2] = (scaled and 0xFF).toByte()
+            out[index * 2 + 1] = ((scaled shr 8) and 0xFF).toByte()
+        }
+        for (i in 0 until fade) {
+            val gain = i.toFloat() / fade
+            scale(i, gain)
+            scale(sampleCount - 1 - i, gain)
+        }
+        return out
+    }
+
+    private suspend fun playPcm(rawPcm: ByteArray, sampleRate: Int) {
         stopGeminiPlayback()
+        val pcm = smoothEdges(rawPcm, sampleRate)
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -226,7 +323,7 @@ class VoiceEngine @Inject constructor(
         track.write(pcm, 0, pcm.size)
         track.play()
         _audioLevelFlow.value = 0.7f
-        delay(pcm.size * 1000L / (sampleRate * 2) + 200)
+        delay(pcm.size * 1000L / (sampleRate * 2) + 100)
         _audioLevelFlow.value = 0f
         if (geminiTrack === track) stopGeminiPlayback()
     }

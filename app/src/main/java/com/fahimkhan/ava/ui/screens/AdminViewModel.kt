@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fahimkhan.ava.admin.AdminRepository
 import com.fahimkhan.ava.core.utils.ApiKeyStore
+import com.fahimkhan.ava.voice.engine.VoiceEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -31,12 +32,23 @@ data class AdminState(
 @HiltViewModel
 class AdminViewModel @Inject constructor(
     private val adminRepo: AdminRepository,
-    private val apiKeyStore: ApiKeyStore
+    private val apiKeyStore: ApiKeyStore,
+    private val voiceEngine: VoiceEngine
 ) : ViewModel() {
     private val _isAuthenticated = MutableStateFlow(false)
     val isAuthenticated = _isAuthenticated.asStateFlow()
     private val _adminState = MutableStateFlow(AdminState())
     val adminState = _adminState.asStateFlow()
+
+    init {
+        // "Voice Engine" in SYSTEM STATUS now shows what the voice really did
+        // last (Gemini voice, or why it fell back to the phone's voice).
+        viewModelScope.launch {
+            voiceEngine.lastVoiceStatus.collect { status ->
+                _adminState.update { it.copy(voiceEngineStatus = status) }
+            }
+        }
+    }
 
     fun authenticate(password: String) = viewModelScope.launch {
         val ok = adminRepo.verifyPassword(password)

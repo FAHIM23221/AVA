@@ -383,7 +383,13 @@ fun AdminStatRow(label: String, value: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, color = AvaColors.TextMuted, fontSize = 12.sp)
-        Text(value, color = AvaColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        // weight(fill = false): a long value (e.g. the voice fallback reason) wraps
+        // onto more lines instead of squeezing the label.
+        Text(
+            value, color = AvaColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f, fill = false).padding(start = 12.dp)
+        )
     }
 }
 
